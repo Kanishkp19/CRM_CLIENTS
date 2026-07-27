@@ -21,9 +21,8 @@ async function getAuthUserId(): Promise<string | null> {
 
 async function getBusinessForRequest() {
   const userId = await getAuthUserId();
-  return userId
-    ? await db.business.findFirst({ where: { ownerUserId: userId } })
-    : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+  if (!userId) return null;
+  return await db.business.findFirst({ where: { ownerUserId: userId } });
 }
 
 export async function GET(req: NextRequest) {

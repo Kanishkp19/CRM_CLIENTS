@@ -1,6 +1,6 @@
-// GET  /api/business  -> current business (authenticated user or fallback)
-// POST /api/business  -> create business with vertical template applied (onboarding flow)
-// PATCH /api/business -> update reminder config / message templates / tier
+// GET  /api/business  -> current business for authenticated owner only
+// POST /api/business  -> create business for authenticated owner
+// PATCH /api/business -> update business settings for authenticated owner
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -17,33 +17,17 @@ async function getAuthUserId(): Promise<string | null> {
     if (data.user?.id) return data.user.id;
   } catch {}
 
-  try {
-    const admin = createAdminClient();
-    const { data: usersData } = await admin.auth.admin.listUsers();
-    if (usersData?.users && usersData.users.length > 0) {
-      return usersData.users[0].id;
-    }
-    const { data: newUser } = await admin.auth.admin.createUser({
-      email: `owner_${Date.now()}@cyclecrm.app`,
-      email_confirm: true,
-    });
-    if (newUser?.user?.id) return newUser.user.id;
-  } catch (err: any) {
-    console.warn("Admin guest auth lookup fallback:", err?.message);
-  }
-
   return null;
 }
 
 export async function GET() {
   try {
     const userId = await getAuthUserId();
+    if (!userId) return NextResponse.json({ business: null });
 
-    let business = userId
-      ? await db.business.findFirst({ where: { ownerUserId: userId } })
-      : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
-
+    const business = await db.business.findFirst({ where: { ownerUserId: userId } });
     if (!business) return NextResponse.json({ business: null });
+
     return NextResponse.json({ business: serializeBusiness(business) });
   } catch (err: any) {
     console.warn("GET /api/business warning:", err?.message);
@@ -66,7 +50,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const userId = await getAuthUserId();
+  let userId = await getAuthUserId();
+  if (!userId) {
+    // If onboarding without pre-existing session, provision or retrieve guest user in Supabase auth
+    try {
+      const admin = createAdminClient();
+      const { data: newUser } = await admin.auth.admin.createUser({
+        email: `owner_${Date.now()}@cyclecrm.app`,
+        email_confirm: true,
+      });
+      if (newUser?.user?.id) userId = newUser.user.id;
+    } catch {}
+  }
+
   if (!userId) {
     return NextResponse.json({ error: "Could not associate business with an owner account" }, { status: 400 });
   }
@@ -101,12 +97,10 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const userId = await getAuthUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const business = userId
-      ? await db.business.findFirst({ where: { ownerUserId: userId } })
-      : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
-
+    const business = await db.business.findFirst({ where: { ownerUserId: userId } });
     if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
 
     const patch: Record<string, any> = {};

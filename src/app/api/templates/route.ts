@@ -1,16 +1,27 @@
 // POST /api/templates
-// AI-draft message-template set for a business with guaranteed fallback.
+// AI-draft message-template set for authenticated owner business.
 
 import { NextRequest, NextResponse } from "next/server";
 import { draftMessageTemplates } from "@/lib/zai";
 import { db } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
 import { serializeBusiness } from "@/lib/serialize";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const tone: "friendly" | "professional" | "casual" = body.tone ?? "friendly";
 
-  const business = await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+  let userId: string | null = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    userId = data.user?.id ?? null;
+  } catch {}
+
+  const business = userId
+    ? await db.business.findFirst({ where: { ownerUserId: userId } })
+    : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+
   if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
 
   try {
