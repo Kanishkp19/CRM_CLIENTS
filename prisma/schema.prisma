@@ -1,6 +1,5 @@
 // Cycle — Universal Membership & Lifecycle CRM
-// Prisma schema adapted from TRD §3.
-// One codebase, one schema, one reminder engine. New verticals = config, never new tables.
+// Production Hardened Prisma Schema
 
 generator client {
   provider = "prisma-client-js"
@@ -12,20 +11,19 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-/// A business (one per owner in v1). Vertical-agnostic — vertical identity lives in `verticalType`,
-/// `entityLabel`, `cycleType`, `customFieldSchema`, `reminderConfig`, `messageTemplates`.
+/// A business (one per owner in v1). Vertical-agnostic.
 model Business {
   id                 String   @id @default(cuid())
-  ownerUserId        String   @default("00000000-0000-0000-0000-000000000000") @map("owner_user_id") // maps to Supabase auth.users id
+  ownerUserId        String   @default("00000000-0000-0000-0000-000000000000") @map("owner_user_id")
   ownerName          String   @map("owner_name")
   name               String
-  verticalType       String   @map("vertical_type") // gym | tuition | salon | pet_daycare | amc | rental
-  entityLabel        String   @map("entity_label") // "Member" | "Student" | "Pet" | "Client" — display only
-  cycleType          String   @default("date_based") @map("cycle_type") // date_based | count_based | both
-  customFieldSchema  String   @default("[]") @map("custom_field_schema") // JSON: {"breed":"text","vaccination_date":"date"}
-  reminderConfig     String   @default("{}") @map("reminder_config") // JSON: {"daysBeforeExpiry":[7,1],"sessionsRemainingThreshold":2}
-  messageTemplates   String   @default("{}") @map("message_templates") // JSON: {registration:..., preExpiry:..., expiryDay:..., postExpiry:...}
-  tier               String   @default("free") // free | starter | growth | custom
+  verticalType       String   @map("vertical_type")
+  entityLabel        String   @map("entity_label")
+  cycleType          String   @default("date_based") @map("cycle_type")
+  customFieldSchema  Json     @default("[]") @map("custom_field_schema")
+  reminderConfig     Json     @default("{}") @map("reminder_config")
+  messageTemplates   Json     @default("{}") @map("message_templates")
+  tier               String   @default("free")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
@@ -41,8 +39,8 @@ model Entity {
   name          String
   phone         String
   email         String?
-  customFields  String   @default("{}") @map("custom_fields") // JSON, keyed per Business.customFieldSchema
-  status        String   @default("active") // active | expiring_soon | expired | lapsed (derived, cached)
+  customFields  Json     @default("{}") @map("custom_fields")
+  status        String   @default("active")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -57,13 +55,13 @@ model Entity {
 model Cycle {
   id              String   @id @default(cuid())
   entityId        String   @map("entity_id")
-  planName        String   @map("plan_name") // "3-month membership", "10-session package"
+  planName        String   @map("plan_name")
   startDate       DateTime @map("start_date")
-  endDate         DateTime? @map("end_date") // nullable — used for date_based
-  unitsTotal      Int?     @map("units_total") // nullable — used for count_based (e.g. 10 sessions)
-  unitsRemaining Int?      @map("units_remaining") // nullable, decremented on usage
-  status          String   @default("active") // active | completed | renewed | lapsed
-  amount          Float?   // optional, for owner's own record-keeping
+  endDate         DateTime? @map("end_date")
+  unitsTotal      Int?     @map("units_total")
+  unitsRemaining Int?      @map("units_remaining")
+  status          String   @default("active")
+  amount          Decimal? @db.Decimal(10, 2)
   createdAt       DateTime @default(now()) @map("created_at")
 
   entity          Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
@@ -72,16 +70,17 @@ model Cycle {
   @@map("cycles")
 }
 
-/// Audit log of every outbound WhatsApp / email notification.
+/// Audit log of every outbound WhatsApp / email notification with atomic deduplication.
 model NotificationLog {
   id           String   @id @default(cuid())
   entityId     String   @map("entity_id")
   cycleId      String?  @map("cycle_id")
-  channel      String   // whatsapp | email
-  triggerType  String   @map("trigger_type") // registration | pre_expiry | expiry_day | post_expiry
+  dedupKey     String?  @unique @map("dedup_key")
+  channel      String
+  triggerType  String   @map("trigger_type")
   message      String
   sentAt       DateTime @default(now()) @map("sent_at")
-  status       String   @default("sent") // sent | failed
+  status       String   @default("sent")
 
   entity       Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
   cycle        Cycle?   @relation(fields: [cycleId], references: [id], onDelete: SetNull)

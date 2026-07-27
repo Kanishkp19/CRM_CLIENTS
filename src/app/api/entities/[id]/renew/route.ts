@@ -1,6 +1,5 @@
 // POST /api/entities/:id/renew
-// Marks the latest cycle as "renewed" and creates a new active cycle on top.
-// Per PRD §6 flow 4: "owner marks a cycle as renewed → new cycle created, old cycle archived."
+// Marks previous active cycle as "renewed" and creates new active cycle inside an atomic transaction.
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -21,9 +20,6 @@ export async function POST(
   const latestCycle = entity.cycles[0];
   if (!latestCycle) return NextResponse.json({ error: "No cycle to renew" }, { status: 400 });
 
-  await db.cycle.update({ where: { id: latestCycle.id }, data: { status: "renewed" } });
-
-  // New cycle starts today, ends today + same duration as the previous one (or new provided values)
   const newStart = new Date(body.startDate ?? new Date());
   newStart.setHours(0, 0, 0, 0);
 
@@ -41,43 +37,50 @@ export async function POST(
   const newUnitsTotal = body.unitsTotal ?? latestCycle.unitsTotal;
   const newUnitsRemaining = newUnitsTotal;
 
-  const newCycle = await db.cycle.create({
-    data: {
-      entityId,
-      planName: body.planName ?? latestCycle.planName,
-      startDate: newStart,
-      endDate: newEnd,
-      unitsTotal: newUnitsTotal,
-      unitsRemaining: newUnitsRemaining,
-      amount: body.amount ?? latestCycle.amount ?? null,
-      status: "active",
-    },
-  });
+  // Execute renewal cycle creation and status updates atomically
+  const [_, newCycle] = await db.$transaction([
+    db.cycle.update({ where: { id: latestCycle.id }, data: { status: "renewed" } }),
+    db.cycle.create({
+      data: {
+        entityId,
+        planName: body.planName ?? latestCycle.planName,
+        startDate: newStart,
+        endDate: newEnd,
+        unitsTotal: newUnitsTotal,
+        unitsRemaining: newUnitsRemaining,
+        amount: body.amount ?? latestCycle.amount ?? null,
+        status: "active",
+      },
+    }),
+    db.entity.update({ where: { id: entityId }, data: { status: "active" } }),
+  ]);
 
   // Send registration-style confirmation
-  const templates = JSON.parse(entity.business.messageTemplates);
-  const msg = (templates.registration as string)
-    .replace(/{{name}}/g, entity.name)
-    .replace(/{{business}}/g, entity.business.name)
-    .replace(/{{plan}}/g, newCycle.planName)
-    .replace(/{{days_left}}/g, newEnd ? String(Math.round((newEnd.getTime() - newStart.getTime()) / (1000*60*60*24))) : "")
-    .replace(/{{units_remaining}}/g, newUnitsRemaining != null ? String(newUnitsRemaining) : "")
-    .replace(/{{start_date}}/g, newStart.toISOString().slice(0, 10))
-    .replace(/{{end_date}}/g, newEnd ? newEnd.toISOString().slice(0, 10) : "");
+  const templates = (typeof entity.business.messageTemplates === "string"
+    ? JSON.parse(entity.business.messageTemplates)
+    : entity.business.messageTemplates) as any;
 
-  await db.notificationLog.create({
-    data: {
-      entityId,
-      cycleId: newCycle.id,
-      channel: "whatsapp",
-      triggerType: "registration",
-      message: msg,
-      status: "sent",
-    },
-  });
+  if (templates?.registration) {
+    const msg = (templates.registration as string)
+      .replace(/{{name}}/g, entity.name)
+      .replace(/{{business}}/g, entity.business.name)
+      .replace(/{{plan}}/g, newCycle.planName)
+      .replace(/{{days_left}}/g, newEnd ? String(Math.round((newEnd.getTime() - newStart.getTime()) / (1000 * 60 * 60 * 24))) : "")
+      .replace(/{{units_remaining}}/g, newUnitsRemaining != null ? String(newUnitsRemaining) : "")
+      .replace(/{{start_date}}/g, newStart.toISOString().slice(0, 10))
+      .replace(/{{end_date}}/g, newEnd ? newEnd.toISOString().slice(0, 10) : "");
 
-  // Reset cached entity status to active
-  await db.entity.update({ where: { id: entityId }, data: { status: "active" } });
+    await db.notificationLog.create({
+      data: {
+        entityId,
+        cycleId: newCycle.id,
+        channel: "whatsapp",
+        triggerType: "registration",
+        message: msg,
+        status: "sent",
+      },
+    });
+  }
 
   const refreshed = await db.entity.findUnique({
     where: { id: entityId },

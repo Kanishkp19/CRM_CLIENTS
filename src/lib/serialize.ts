@@ -1,5 +1,5 @@
-// Tiny helper to serialize Prisma rows into JSON-safe DTOs.
-// SQLite stores our JSON fields as TEXT — we parse them here.
+// Helper to serialize Prisma rows into JSON-safe DTOs.
+// Supports both native Postgres JSONB/Decimal and serialized legacy representations.
 
 import type {
   BusinessDTO,
@@ -16,9 +16,9 @@ type PrismaBusiness = {
   verticalType: string;
   entityLabel: string;
   cycleType: string;
-  customFieldSchema: string;
-  reminderConfig: string;
-  messageTemplates: string;
+  customFieldSchema: any;
+  reminderConfig: any;
+  messageTemplates: any;
   tier: string;
   createdAt: Date;
 };
@@ -29,7 +29,7 @@ type PrismaEntity = {
   name: string;
   phone: string;
   email: string | null;
-  customFields: string;
+  customFields: any;
   status: string;
   createdAt: Date;
   updatedAt: Date;
@@ -46,7 +46,7 @@ type PrismaCycle = {
   unitsTotal: number | null;
   unitsRemaining: number | null;
   status: string;
-  amount: number | null;
+  amount: any;
   createdAt: Date;
 };
 
@@ -87,7 +87,7 @@ export function serializeCycle(c: PrismaCycle): CycleDTO {
     unitsTotal: c.unitsTotal,
     unitsRemaining: c.unitsRemaining,
     status: c.status as CycleDTO["status"],
-    amount: c.amount,
+    amount: c.amount != null ? Number(c.amount) : null,
     createdAt: c.createdAt.toISOString(),
   };
 }
@@ -121,11 +121,14 @@ export function serializeEntity(e: PrismaEntity): EntityDTO {
   };
 }
 
-function safeParseArr(s: string): any[] {
+function safeParseArr(s: any): any[] {
+  if (Array.isArray(s)) return s;
   if (!s) return [];
-  try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; }
+  try { const v = typeof s === "string" ? JSON.parse(s) : s; return Array.isArray(v) ? v : []; } catch { return []; }
 }
-function safeParseObj<T = any>(s: string): T {
+
+function safeParseObj<T = any>(s: any): T {
+  if (typeof s === "object" && s !== null) return s as T;
   if (!s) return {} as T;
-  try { return JSON.parse(s) as T; } catch { return {} as T; }
+  try { return typeof s === "string" ? JSON.parse(s) as T : (s as T); } catch { return {} as T; }
 }

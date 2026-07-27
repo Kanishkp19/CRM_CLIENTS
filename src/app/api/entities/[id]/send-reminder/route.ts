@@ -19,10 +19,13 @@ export async function POST(
   const cycle = entity.cycles[0];
   if (!cycle) return NextResponse.json({ error: "No active cycle" }, { status: 400 });
 
-  const templates = JSON.parse(entity.business.messageTemplates);
+  const templates = (typeof entity.business.messageTemplates === "string"
+    ? JSON.parse(entity.business.messageTemplates)
+    : entity.business.messageTemplates) as any;
+
   const isExpired = entity.status === "expired" || entity.status === "lapsed";
   const triggerType = isExpired ? "post_expiry" : "pre_expiry";
-  const template = isExpired ? (templates.postExpiry || templates.post_expiry) : (templates.preExpiry || templates.pre_expiry);
+  const template = isExpired ? (templates?.postExpiry || templates?.post_expiry) : (templates?.preExpiry || templates?.pre_expiry);
 
   const daysLeft = cycle.endDate
     ? Math.round((new Date(cycle.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))

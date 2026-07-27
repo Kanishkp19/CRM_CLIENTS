@@ -1,30 +1,15 @@
 // POST /api/reminder-scan
-// TRD §4 — single scheduled job, runs once daily with idempotency safeguards.
+// Atomic Claim-First Deduplication via PostgreSQL Unique Constraint on dedupKey.
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serializeBusiness } from "@/lib/serialize";
 import { sendNotificationMessage } from "@/lib/messaging";
 
-async function hasAlreadyNotifiedToday(entityId: string, cycleId: string, triggerType: string): Promise<boolean> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
-  const existing = await db.notificationLog.findFirst({
-    where: {
-      entityId,
-      cycleId,
-      triggerType,
-      sentAt: { gte: startOfDay },
-      status: "sent",
-    },
-  });
-  return !!existing;
-}
-
 export async function POST(_req: NextRequest) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const todayIso = today.toISOString().slice(0, 10);
   const msPerDay = 1000 * 60 * 60 * 24;
 
   const businesses = await db.business.findMany();
@@ -73,8 +58,23 @@ export async function POST(_req: NextRequest) {
         const daysLeft = Math.round((end.getTime() - today.getTime()) / msPerDay);
 
         if (daysBeforeExpiry.includes(daysLeft) && daysLeft > 0) {
-          if (!(await hasAlreadyNotifiedToday(entity.id, cycle.id, "pre_expiry"))) {
-            const msg = interpolated(templates.preExpiry).replace(/{{days_left}}/g, String(daysLeft));
+          const triggerType = "pre_expiry";
+          const dedupKey = `${entity.id}:${cycle.id}:${triggerType}:${todayIso}`;
+          const msg = interpolated(templates.preExpiry).replace(/{{days_left}}/g, String(daysLeft));
+
+          try {
+            await db.notificationLog.create({
+              data: {
+                entityId: entity.id,
+                cycleId: cycle.id,
+                dedupKey,
+                channel: "email",
+                triggerType,
+                message: msg,
+                status: "pending",
+              },
+            });
+
             const dispatch = await sendNotificationMessage({
               toEmail: entity.email,
               toPhone: entity.phone,
@@ -83,24 +83,38 @@ export async function POST(_req: NextRequest) {
               businessName: business.name,
             });
 
-            await db.notificationLog.create({
-              data: {
-                entityId: entity.id,
-                cycleId: cycle.id,
-                channel: dispatch.channel,
-                triggerType: "pre_expiry",
-                message: msg,
-                status: dispatch.status,
-              },
+            await db.notificationLog.update({
+              where: { dedupKey },
+              data: { status: dispatch.status, channel: dispatch.channel },
             });
-            sent.push({ entityId: entity.id, triggerType: "pre_expiry", channel: dispatch.channel });
+
+            sent.push({ entityId: entity.id, triggerType, channel: dispatch.channel });
+          } catch (e: any) {
+            // P2002: unique constraint violation — slot already claimed by another cron run!
+            if (e.code !== "P2002") console.warn("Atomic claim error:", e?.message);
           }
+
           expiringSoonEntityIds.push(entity.id);
         }
 
         if (daysLeft === 0) {
-          if (!(await hasAlreadyNotifiedToday(entity.id, cycle.id, "expiry_day"))) {
-            const msg = interpolated(templates.expiryDay);
+          const triggerType = "expiry_day";
+          const dedupKey = `${entity.id}:${cycle.id}:${triggerType}:${todayIso}`;
+          const msg = interpolated(templates.expiryDay);
+
+          try {
+            await db.notificationLog.create({
+              data: {
+                entityId: entity.id,
+                cycleId: cycle.id,
+                dedupKey,
+                channel: "email",
+                triggerType,
+                message: msg,
+                status: "pending",
+              },
+            });
+
             const dispatch = await sendNotificationMessage({
               toEmail: entity.email,
               toPhone: entity.phone,
@@ -109,30 +123,46 @@ export async function POST(_req: NextRequest) {
               businessName: business.name,
             });
 
-            await db.notificationLog.create({
-              data: {
-                entityId: entity.id,
-                cycleId: cycle.id,
-                channel: dispatch.channel,
-                triggerType: "expiry_day",
-                message: msg,
-                status: dispatch.status,
-              },
+            await db.notificationLog.update({
+              where: { dedupKey },
+              data: { status: dispatch.status, channel: dispatch.channel },
             });
-            sent.push({ entityId: entity.id, triggerType: "expiry_day", channel: dispatch.channel });
+
+            sent.push({ entityId: entity.id, triggerType, channel: dispatch.channel });
+          } catch (e: any) {
+            if (e.code !== "P2002") console.warn("Atomic claim error:", e?.message);
           }
         }
 
         if (daysLeft < 0 && daysLeft > -7) {
           await db.entity.update({ where: { id: entity.id }, data: { status: "expired" } });
         }
+
         if (daysLeft <= -7) {
-          await db.cycle.update({ where: { id: cycle.id }, data: { status: "lapsed" } });
-          await db.entity.update({ where: { id: entity.id }, data: { status: "lapsed" } });
+          await db.$transaction([
+            db.cycle.update({ where: { id: cycle.id }, data: { status: "lapsed" } }),
+            db.entity.update({ where: { id: entity.id }, data: { status: "lapsed" } }),
+          ]);
           lapsedEntityIds.push(entity.id);
+
           if (reminderConfig.sendPostExpiry) {
-            if (!(await hasAlreadyNotifiedToday(entity.id, cycle.id, "post_expiry"))) {
-              const msg = interpolated(templates.postExpiry);
+            const triggerType = "post_expiry";
+            const dedupKey = `${entity.id}:${cycle.id}:${triggerType}:${todayIso}`;
+            const msg = interpolated(templates.postExpiry);
+
+            try {
+              await db.notificationLog.create({
+                data: {
+                  entityId: entity.id,
+                  cycleId: cycle.id,
+                  dedupKey,
+                  channel: "email",
+                  triggerType,
+                  message: msg,
+                  status: "pending",
+                },
+              });
+
               const dispatch = await sendNotificationMessage({
                 toEmail: entity.email,
                 toPhone: entity.phone,
@@ -141,17 +171,14 @@ export async function POST(_req: NextRequest) {
                 businessName: business.name,
               });
 
-              await db.notificationLog.create({
-                data: {
-                  entityId: entity.id,
-                  cycleId: cycle.id,
-                  channel: dispatch.channel,
-                  triggerType: "post_expiry",
-                  message: msg,
-                  status: dispatch.status,
-                },
+              await db.notificationLog.update({
+                where: { dedupKey },
+                data: { status: dispatch.status, channel: dispatch.channel },
               });
-              sent.push({ entityId: entity.id, triggerType: "post_expiry", channel: dispatch.channel });
+
+              sent.push({ entityId: entity.id, triggerType, channel: dispatch.channel });
+            } catch (e: any) {
+              if (e.code !== "P2002") console.warn("Atomic claim error:", e?.message);
             }
           }
         }
@@ -160,9 +187,25 @@ export async function POST(_req: NextRequest) {
       // Count-based trigger
       if (business.cycleType === "count_based" || business.cycleType === "both") {
         if (cycle.unitsRemaining == null) continue;
+
         if (cycle.unitsRemaining === sessionsThreshold && cycle.unitsRemaining > 0) {
-          if (!(await hasAlreadyNotifiedToday(entity.id, cycle.id, "pre_expiry"))) {
-            const msg = interpolated(templates.preExpiry);
+          const triggerType = "pre_expiry";
+          const dedupKey = `${entity.id}:${cycle.id}:${triggerType}:${todayIso}`;
+          const msg = interpolated(templates.preExpiry);
+
+          try {
+            await db.notificationLog.create({
+              data: {
+                entityId: entity.id,
+                cycleId: cycle.id,
+                dedupKey,
+                channel: "email",
+                triggerType,
+                message: msg,
+                status: "pending",
+              },
+            });
+
             const dispatch = await sendNotificationMessage({
               toEmail: entity.email,
               toPhone: entity.phone,
@@ -171,23 +214,36 @@ export async function POST(_req: NextRequest) {
               businessName: business.name,
             });
 
+            await db.notificationLog.update({
+              where: { dedupKey },
+              data: { status: dispatch.status, channel: dispatch.channel },
+            });
+
+            sent.push({ entityId: entity.id, triggerType, channel: dispatch.channel });
+          } catch (e: any) {
+            if (e.code !== "P2002") console.warn("Atomic claim error:", e?.message);
+          }
+          expiringSoonEntityIds.push(entity.id);
+        }
+
+        if (cycle.unitsRemaining === 0) {
+          const triggerType = "expiry_day";
+          const dedupKey = `${entity.id}:${cycle.id}:${triggerType}:${todayIso}`;
+          const msg = interpolated(templates.expiryDay);
+
+          try {
             await db.notificationLog.create({
               data: {
                 entityId: entity.id,
                 cycleId: cycle.id,
-                channel: dispatch.channel,
-                triggerType: "pre_expiry",
+                dedupKey,
+                channel: "email",
+                triggerType,
                 message: msg,
-                status: dispatch.status,
+                status: "pending",
               },
             });
-            sent.push({ entityId: entity.id, triggerType: "pre_expiry", channel: dispatch.channel });
-          }
-          expiringSoonEntityIds.push(entity.id);
-        }
-        if (cycle.unitsRemaining === 0) {
-          if (!(await hasAlreadyNotifiedToday(entity.id, cycle.id, "expiry_day"))) {
-            const msg = interpolated(templates.expiryDay);
+
             const dispatch = await sendNotificationMessage({
               toEmail: entity.email,
               toPhone: entity.phone,
@@ -196,19 +252,20 @@ export async function POST(_req: NextRequest) {
               businessName: business.name,
             });
 
-            await db.notificationLog.create({
-              data: {
-                entityId: entity.id,
-                cycleId: cycle.id,
-                channel: dispatch.channel,
-                triggerType: "expiry_day",
-                message: msg,
-                status: dispatch.status,
-              },
+            await db.notificationLog.update({
+              where: { dedupKey },
+              data: { status: dispatch.status, channel: dispatch.channel },
             });
-            sent.push({ entityId: entity.id, triggerType: "expiry_day", channel: dispatch.channel });
+
+            sent.push({ entityId: entity.id, triggerType, channel: dispatch.channel });
+          } catch (e: any) {
+            if (e.code !== "P2002") console.warn("Atomic claim error:", e?.message);
           }
-          await db.entity.update({ where: { id: entity.id }, data: { status: "expired" } });
+
+          await db.$transaction([
+            db.cycle.update({ where: { id: cycle.id }, data: { status: "completed" } }),
+            db.entity.update({ where: { id: entity.id }, data: { status: "expired" } }),
+          ]);
         }
       }
     }

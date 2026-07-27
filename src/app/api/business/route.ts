@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getVerticalTemplate, type ReminderConfig, type MessageTemplates } from "@/lib/verticals";
+import { getVerticalTemplate } from "@/lib/verticals";
 import { serializeBusiness } from "@/lib/serialize";
 import type { CycleType, Tier } from "@/lib/types";
 
@@ -52,7 +52,6 @@ export async function POST(req: NextRequest) {
 
   let userId = await getAuthUserId();
   if (!userId) {
-    // If onboarding without pre-existing session, provision or retrieve guest user in Supabase auth
     try {
       const admin = createAdminClient();
       const { data: newUser } = await admin.auth.admin.createUser({
@@ -67,7 +66,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not associate business with an owner account" }, { status: 400 });
   }
 
-  // Idempotency check: If business already exists for this owner, return it directly
   const existing = await db.business.findFirst({ where: { ownerUserId: userId } });
   if (existing) {
     return NextResponse.json({ business: serializeBusiness(existing) });
@@ -87,9 +85,9 @@ export async function POST(req: NextRequest) {
         verticalType: template.verticalType,
         entityLabel: template.entityLabel,
         cycleType: template.cycleType as CycleType,
-        customFieldSchema: JSON.stringify(template.customFieldSchema),
-        reminderConfig: JSON.stringify(template.reminderConfig),
-        messageTemplates: JSON.stringify(template.messageTemplates),
+        customFieldSchema: template.customFieldSchema as any,
+        reminderConfig: template.reminderConfig as any,
+        messageTemplates: template.messageTemplates as any,
         tier: "free",
       },
     });
@@ -110,8 +108,8 @@ export async function PATCH(req: NextRequest) {
     if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
 
     const patch: Record<string, any> = {};
-    if (body.reminderConfig) patch.reminderConfig = JSON.stringify(body.reminderConfig as ReminderConfig);
-    if (body.messageTemplates) patch.messageTemplates = JSON.stringify(body.messageTemplates as MessageTemplates);
+    if (body.reminderConfig) patch.reminderConfig = body.reminderConfig;
+    if (body.messageTemplates) patch.messageTemplates = body.messageTemplates;
     if (body.tier && ["free", "starter", "growth", "custom"].includes(body.tier)) {
       patch.tier = body.tier as Tier;
     }

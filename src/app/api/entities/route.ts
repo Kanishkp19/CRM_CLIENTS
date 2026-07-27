@@ -34,7 +34,9 @@ export async function GET(req: NextRequest) {
   const business = await getBusinessForRequest();
   if (!business) return NextResponse.json({ entities: [] });
 
-  const reminderConfig = JSON.parse(business.reminderConfig) as {
+  const reminderConfig = (typeof business.reminderConfig === "string"
+    ? JSON.parse(business.reminderConfig)
+    : business.reminderConfig) as {
     daysBeforeExpiry: number[];
     sessionsRemainingThreshold: number;
     sendPostExpiry: boolean;
@@ -135,14 +137,25 @@ export async function POST(req: NextRequest) {
   const unitsTotal = cycle.unitsTotal ?? null;
   const unitsRemaining = unitsTotal;
 
+  const reminderConfig = (typeof business.reminderConfig === "string"
+    ? JSON.parse(business.reminderConfig)
+    : business.reminderConfig) as any;
+
+  const derivedInitialStatus = deriveEntityStatus({
+    cycleType: business.cycleType as any,
+    endDate: end,
+    unitsRemaining,
+    reminderConfig,
+  });
+
   const created = await db.entity.create({
     data: {
       businessId: business.id,
       name,
       phone,
       email: email ?? null,
-      customFields: JSON.stringify(customFields ?? {}),
-      status: "active",
+      customFields: (customFields ?? {}) as any,
+      status: derivedInitialStatus,
       cycles: {
         create: {
           planName: cycle.planName,
@@ -161,19 +174,11 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const reminderConfig = JSON.parse(business.reminderConfig);
-  const status = deriveEntityStatus({
-    cycleType: business.cycleType as any,
-    endDate: end,
-    unitsRemaining,
-    reminderConfig,
-  });
-  if (status !== "active") {
-    await db.entity.update({ where: { id: created.id }, data: { status } });
-  }
+  const templates = (typeof business.messageTemplates === "string"
+    ? JSON.parse(business.messageTemplates)
+    : business.messageTemplates) as any;
 
-  const templates = JSON.parse(business.messageTemplates);
-  const msg = (templates.registration as string || "Welcome to {{business}}!")
+  const msg = (templates?.registration as string || "Welcome to {{business}}!")
     .replace(/{{name}}/g, name)
     .replace(/{{business}}/g, business.name)
     .replace(/{{plan}}/g, cycle.planName)
