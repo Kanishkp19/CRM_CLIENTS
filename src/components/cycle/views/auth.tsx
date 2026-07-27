@@ -45,7 +45,7 @@ export function AuthView({ onSuccess }: AuthProps) {
           email,
           password,
           options: {
-            emailRedirectTo: origin ? `${origin}` : undefined,
+            emailRedirectTo: origin ? `${origin}` : "https://crm-clients-eight.vercel.app",
             data: {
               owner_name: ownerName || email.split("@")[0],
             },
