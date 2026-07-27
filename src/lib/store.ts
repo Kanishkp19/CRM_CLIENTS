@@ -112,7 +112,6 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         view: state.view === "auth" ? "marketing" : state.view,
         selectedEntityId: state.selectedEntityId,
-        business: state.business,
       }),
     }
   )
