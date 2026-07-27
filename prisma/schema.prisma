@@ -16,7 +16,7 @@ datasource db {
 /// `entityLabel`, `cycleType`, `customFieldSchema`, `reminderConfig`, `messageTemplates`.
 model Business {
   id                 String   @id @default(cuid())
-  ownerUserId        String   @default("demo-user") @map("owner_user_id") // maps to Supabase auth.users id
+  ownerUserId        String   @default("00000000-0000-0000-0000-000000000000") @map("owner_user_id") // maps to Supabase auth.users id
   ownerName          String   @map("owner_name")
   name               String
   verticalType       String   @map("vertical_type") // gym | tuition | salon | pet_daycare | amc | rental
