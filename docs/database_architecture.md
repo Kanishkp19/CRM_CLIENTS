@@ -1,6 +1,6 @@
-# Cycle CRM — Database Architecture & Flowchart
+# Cycle CRM — Hardened Database Architecture & Flowchart
 
-This document provides a comprehensive visual and structural breakdown of how the **Cycle CRM** database functions, how multi-tenant user isolation is enforced, and how data flows from user actions to Supabase PostgreSQL.
+This document provides a comprehensive visual and structural breakdown of how the **Cycle CRM** database functions, how native PostgreSQL features (`JSONB`, `Decimal`, `dedup_key` unique constraints) enforce production reliability, and how multi-tenant isolation is guaranteed.
 
 ---
 
@@ -12,7 +12,7 @@ The diagram below illustrates how an incoming user request traverses authenticat
 flowchart TD
     subgraph Client ["🌐 Client Layer (Next.js / Browser)"]
         User["User Device / Browser"]
-        Store["Zustand Persist Store\n(Local Storage Cache)"]
+        Store["Zustand Persist Store\n(Persists UI view & ID only - No PII)"]
     end
 
     subgraph Auth ["🔒 Supabase Auth System"]
@@ -24,7 +24,7 @@ flowchart TD
         Middleware["Next.js Proxy / Middleware"]
         APIBusiness["/api/business\n(Owner Profile Route)"]
         APIEntities["/api/entities\n(Client & Member Route)"]
-        APIReminder["/api/reminder-scan\n(Cron & Scan Engine)"]
+        APIReminder["/api/reminder-scan\n(Atomic Dedup Cron Engine)"]
     end
 
     subgraph DatabaseLayer ["🗄️ Database & ORM Layer"]
@@ -50,16 +50,16 @@ flowchart TD
     PgBouncer -->|8. Execute SQL Queries| PostgresDB
 
     PostgresDB -->|9. Isolated Records| Prisma
-    Prisma -->|10. Serialized JSON| NextServer
+    Prisma -->|10. Native JSONB & DTOs| NextServer
     NextServer -->|11. Hydrate UI & Store| User
-    User <-->|Local Cache| Store
+    User <-->|UI Route State| Store
 ```
 
 ---
 
 ## 2. Entity-Relationship (ER) Schema Diagram
 
-The database uses a **single universal schema** across all business verticals (Gyms, Salons, Tuition Centers, Pet Daycares, AMC, Rentals). Verticals differ only by configuration tokens rather than table structures.
+The database uses a **hardened universal schema** across all business verticals (Gyms, Salons, Tuition Centers, Pet Daycares, AMC, Rentals). Verticals differ only by JSONB configuration tokens rather than table structure alterations.
 
 ```mermaid
 erDiagram
@@ -83,9 +83,9 @@ erDiagram
         string vertical_type
         string entity_label
         string cycle_type
-        text custom_field_schema
-        text reminder_config
-        text message_templates
+        jsonb custom_field_schema
+        jsonb reminder_config
+        jsonb message_templates
         string tier
         timestamp created_at
         timestamp updated_at
@@ -97,7 +97,7 @@ erDiagram
         string name
         string phone
         string email
-        text custom_fields
+        jsonb custom_fields
         string status
         timestamp created_at
         timestamp updated_at
@@ -112,7 +112,7 @@ erDiagram
         int units_total
         int units_remaining
         string status
-        float amount
+        numeric_10_2 amount
         timestamp created_at
     }
 
@@ -120,6 +120,7 @@ erDiagram
         string id PK
         string entity_id FK
         string cycle_id FK
+        string dedup_key UK
         string channel
         string trigger_type
         text message
@@ -130,49 +131,54 @@ erDiagram
 
 ---
 
-## 3. Step-by-Step Data Execution Lifecycle
+## 3. Atomic Claim-First Reminder Engine & Execution Lifecycle
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Owner as Business Owner
-    participant Web as Next.js Web App
-    participant Auth as Supabase Auth
-    participant API as API Route Layer
-    participant DB as Prisma & PostgreSQL DB
+    actor VercelCron as Vercel Daily Cron
+    participant API as /api/reminder-scan
+    participant DB as PostgreSQL (Prisma)
+    participant Resend as Resend / WhatsApp Transport
 
-    Owner->>Web: 1. Sign In (Email & Password)
-    Web->>Auth: 2. Authenticate Credentials
-    Auth-->>Web: 3. Return Session & Set Auth Cookies
+    VercelCron->>API: 1. Trigger POST /api/reminder-scan (08:00 UTC)
+    API->>DB: 2. Query active & expiring_soon entities
+    DB-->>API: 3. Return target entities & active cycles
 
-    Owner->>Web: 4. Open Dashboard
-    Web->>API: 5. GET /api/business
-    API->>Auth: 6. Extract Session user.id
-    API->>DB: 7. findFirst({ where: { ownerUserId: user.id } })
-    DB-->>API: 8. Return Business Record
-    API-->>Web: 9. Return JSON Business Profile
-
-    Web->>API: 10. GET /api/entities
-    API->>DB: 11. findMany({ where: { businessId }, include: { cycles } })
-    DB-->>API: 12. Return Client Records & Cycles
-    API-->>Web: 13. Return Enriched & Calculated Status List
-
-    Web-->>Owner: 14. Render Polished Responsive Dashboard
+    loop For each eligible entity/cycle
+        API->>DB: 4. Attempt ATOMIC CLAIM: INSERT into notifications_log (dedup_key, status='pending')
+        alt Slot Claimed Successfully (First Thread)
+            DB-->>API: 5. Claim Granted (200 OK)
+            API->>Resend: 6. Dispatch Email / WhatsApp Notification
+            Resend-->>API: 7. Dispatch Status (Success / Sent)
+            API->>DB: 8. UPDATE notifications_log SET status='sent'
+        else Unique Constraint Violation P2002 (Duplicate Thread / Retry)
+            DB-->>API: 9. ERROR P2002 (Slot already claimed)
+            API-->>API: 10. SKIP DISPATCH (Prevent duplicate message)
+        end
+    end
 ```
 
 ---
 
-## 4. Key Architectural Safeguards
+## 4. Key Production Architectural Hardening Features
 
-### A. Multi-Tenant Data Isolation
-- Every database query for businesses filters strictly by `ownerUserId: user.id`.
-- Every database query for entities filters strictly by `businessId: business.id`.
-- This ensures **zero cross-tenant data leaks**—different owners will never see or access each other's clients.
+### A. Native `JSONB` Database Types
+- `custom_field_schema`, `reminder_config`, `message_templates`, and `custom_fields` are stored as native PostgreSQL `jsonb` columns.
+- Prevents text stringification corruptions, enables schema indexing, and eliminates manual `JSON.parse` double-serialization.
 
-### B. Connection Pooling (`?pgbouncer=true`)
-- Supabase Pooler operates on port `6543` in **Transaction Mode**.
-- The `DATABASE_URL` is configured with `?pgbouncer=true` so Prisma uses simple query protocol and avoids prepared statement collisions (`PostgresError 42P05`).
+### B. Atomic Claim-First Deduplication (`dedup_key UNIQUE`)
+- `notifications_log` enforces a unique constraint on `dedup_key` (`${entityId}:${cycleId}:${triggerType}:${todayIso}`).
+- The system attempts an atomic slot claim in PostgreSQL **before** triggering outbound WhatsApp or email dispatches. Concurrent cron runs or timeouts cannot cause duplicate messages.
 
-### C. Universal Schema Design
-- Custom fields per vertical (e.g., `breed` for Pets, `goal` for Gyms) are stored as structured JSON strings inside `custom_fields` and `custom_field_schema`.
-- Adding new business verticals requires **zero database DDL migrations**.
+### C. Transactional State Sync (`db.$transaction`)
+- Cycle updates (renewals, decrements, lapses) and entity status calculations are executed inside atomic `db.$transaction([ ... ])` calls.
+- Guarantees zero status drift between `cycles.status` and `entities.status`.
+
+### D. Currency Precision (`numeric(10,2)`)
+- Financial `amount` fields are stored using PostgreSQL `numeric(10, 2)` (Prisma `Decimal` type).
+- Prevents IEEE 754 floating-point rounding errors (e.g. ₹1500.10 becoming ₹1500.099999...).
+
+### E. Privacy & Zero Client PII Storage
+- Zustand browser `localStorage` persistence stores **only** UI navigation state (`view` and `selectedEntityId`).
+- Client PII (names, emails, phone numbers) is never cached in local storage, preventing stale UI states and privacy risks.
