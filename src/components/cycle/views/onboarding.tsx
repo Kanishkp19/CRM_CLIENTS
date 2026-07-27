@@ -40,26 +40,45 @@ export function OnboardingView() {
   const [submitting, setSubmitting] = useState(false);
   const [aiDrafting, setAiDrafting] = useState(false);
 
-  const template = getVerticalTemplate(verticalType);
+  const template = getVerticalTemplate(verticalType) ?? VERTICAL_TEMPLATES[0];
+
+  function goToStep3() {
+    if (!ownerName.trim() || !businessName.trim()) {
+      toast({
+        title: "Missing Information",
+        description: "Please enter your name and business name before continuing.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setStep(3);
+  }
 
   async function submit() {
     if (!ownerName.trim() || !businessName.trim()) {
-      toast({ title: "Fill in your name and business name first", variant: "destructive" });
+      toast({
+        title: "Missing Information",
+        description: "Please enter your name and business name.",
+        variant: "destructive",
+      });
+      setStep(2);
       return;
     }
     setSubmitting(true);
     try {
-      // 1. Create business with vertical template applied
+      // 1. Create business profile with vertical template
       const res = await fetch("/api/business", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerName, name: businessName, verticalType }),
+        body: JSON.stringify({ ownerName: ownerName.trim(), name: businessName.trim(), verticalType }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Failed");
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to create business profile");
+      }
       setBusiness(json.business);
 
-      // 2. AI-draft message templates (best-effort — fail silently to manual templates)
+      // 2. AI-draft message templates (optional — fail silently to defaults)
       setAiDrafting(true);
       try {
         const draftRes = await fetch("/api/templates", {
@@ -72,14 +91,22 @@ export function OnboardingView() {
           setBusiness(draftJson.business);
         }
       } catch {
-        // templates already defaulted by vertical — fine
+        // template defaults already applied — safe fallback
       }
 
       setAiDrafting(false);
       setView("dashboard");
-      toast({ title: `Welcome to Cycle, ${ownerName.split(" ")[0]}!`, description: `${businessName} is live.` });
+      toast({
+        title: `Welcome, ${ownerName.split(" ")[0]}!`,
+        description: `${businessName} is ready for action.`,
+      });
     } catch (e: any) {
-      toast({ title: "Onboarding failed", description: e?.message, variant: "destructive" });
+      console.error("Onboarding submission error:", e);
+      toast({
+        title: "Onboarding failed",
+        description: e?.message ?? "Could not setup business profile",
+        variant: "destructive",
+      });
     } finally {
       setSubmitting(false);
       setAiDrafting(false);
@@ -157,7 +184,7 @@ export function OnboardingView() {
           <div>
             <h2 className="display-lg tracking-display-lg">What kind of business do you run?</h2>
             <p className="body-md mt-2 text-[var(--ink-mute)]">
-              This picks the default labels, fields, and reminder rules. You can customize later.
+              This picks default labels, fields, and reminder rules. You can customize later.
             </p>
 
             <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -273,7 +300,7 @@ export function OnboardingView() {
                 <ArrowLeft className="h-4 w-4" /> Back
               </button>
               <button
-                onClick={() => setStep(3)}
+                onClick={goToStep3}
                 className="inline-flex items-center gap-2 rounded-md bg-[var(--brand)] px-5 py-2 text-sm font-medium text-[var(--on-primary)] hover:bg-[var(--brand-deep)]"
               >
                 Continue <ArrowRight className="h-4 w-4" />
@@ -287,7 +314,7 @@ export function OnboardingView() {
           <div>
             <h2 className="display-lg tracking-display-lg">Let AI draft your message templates</h2>
             <p className="body-md mt-2 text-[var(--ink-mute)]">
-              Pick a tone. Claude will draft registration, pre-expiry, expiry-day, and post-expiry
+              Pick a tone. Gemini will draft registration, pre-expiry, expiry-day, and post-expiry
               WhatsApp messages for {template.entityLabel.toLowerCase()}s of {businessName || "your business"}.
               You can edit them later.
             </p>
@@ -317,10 +344,6 @@ export function OnboardingView() {
                     After onboarding, you&apos;ll see your dashboard with the AI-drafted templates ready
                     to review in <strong>Settings</strong>. You can also re-draft or edit each one
                     individually.
-                  </p>
-                  <p className="caption mt-2 text-[var(--ink-mute)]">
-                    Per design.md: &quot;AI-draft this&quot; button next to each template — AI as
-                    assistive, not autonomous.
                   </p>
                 </div>
               </div>
