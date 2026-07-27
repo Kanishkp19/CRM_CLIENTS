@@ -1,4 +1,4 @@
-// GET  /api/business  -> current business (authenticated user or fallback demo)
+// GET  /api/business  -> current business (authenticated user or fallback)
 // POST /api/business  -> create business with vertical template applied (onboarding flow)
 // PATCH /api/business -> update reminder config / message templates / tier
 
@@ -20,14 +20,19 @@ async function getAuthUserId(): Promise<string | null> {
 }
 
 export async function GET() {
-  const userId = await getAuthUserId();
+  try {
+    const userId = await getAuthUserId();
 
-  let business = userId
-    ? await db.business.findFirst({ where: { ownerUserId: userId } })
-    : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+    let business = userId
+      ? await db.business.findFirst({ where: { ownerUserId: userId } })
+      : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
 
-  if (!business) return NextResponse.json({ business: null });
-  return NextResponse.json({ business: serializeBusiness(business) });
+    if (!business) return NextResponse.json({ business: null });
+    return NextResponse.json({ business: serializeBusiness(business) });
+  } catch (err: any) {
+    console.warn("GET /api/business warning:", err?.message);
+    return NextResponse.json({ business: null });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -52,42 +57,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Unknown vertical: ${verticalType}` }, { status: 400 });
   }
 
-  const business = await db.business.create({
-    data: {
-      ownerUserId: userId,
-      ownerName,
-      name,
-      verticalType: template.verticalType,
-      entityLabel: template.entityLabel,
-      cycleType: template.cycleType as CycleType,
-      customFieldSchema: JSON.stringify(template.customFieldSchema),
-      reminderConfig: JSON.stringify(template.reminderConfig),
-      messageTemplates: JSON.stringify(template.messageTemplates),
-      tier: "free",
-    },
-  });
+  try {
+    const business = await db.business.create({
+      data: {
+        ownerUserId: userId,
+        ownerName,
+        name,
+        verticalType: template.verticalType,
+        entityLabel: template.entityLabel,
+        cycleType: template.cycleType as CycleType,
+        customFieldSchema: JSON.stringify(template.customFieldSchema),
+        reminderConfig: JSON.stringify(template.reminderConfig),
+        messageTemplates: JSON.stringify(template.messageTemplates),
+        tier: "free",
+      },
+    });
 
-  return NextResponse.json({ business: serializeBusiness(business) });
+    return NextResponse.json({ business: serializeBusiness(business) });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Failed to create business profile" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const userId = await getAuthUserId();
 
-  const business = userId
-    ? await db.business.findFirst({ where: { ownerUserId: userId } })
-    : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+  try {
+    const business = userId
+      ? await db.business.findFirst({ where: { ownerUserId: userId } })
+      : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
 
-  if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
+    if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
 
-  const patch: Record<string, any> = {};
-  if (body.reminderConfig) patch.reminderConfig = JSON.stringify(body.reminderConfig as ReminderConfig);
-  if (body.messageTemplates) patch.messageTemplates = JSON.stringify(body.messageTemplates as MessageTemplates);
-  if (body.tier && ["free", "starter", "growth", "custom"].includes(body.tier)) {
-    patch.tier = body.tier as Tier;
+    const patch: Record<string, any> = {};
+    if (body.reminderConfig) patch.reminderConfig = JSON.stringify(body.reminderConfig as ReminderConfig);
+    if (body.messageTemplates) patch.messageTemplates = JSON.stringify(body.messageTemplates as MessageTemplates);
+    if (body.tier && ["free", "starter", "growth", "custom"].includes(body.tier)) {
+      patch.tier = body.tier as Tier;
+    }
+    if (body.name) patch.name = body.name;
+
+    const updated = await db.business.update({ where: { id: business.id }, data: patch });
+    return NextResponse.json({ business: serializeBusiness(updated) });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Failed to update business profile" }, { status: 500 });
   }
-  if (body.name) patch.name = body.name;
-
-  const updated = await db.business.update({ where: { id: business.id }, data: patch });
-  return NextResponse.json({ business: serializeBusiness(updated) });
 }
