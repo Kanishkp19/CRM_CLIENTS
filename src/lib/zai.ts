@@ -28,7 +28,7 @@ export interface ParsedEntityDraft {
 
 const SYSTEM_PARSE_VOICE = `CRM parser. Convert audio/transcript into JSON object with fields: name (string), phone (digits string), email (string), planName (string), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), unitsTotal (number), amount (number), confidence ("high"|"medium"|"low"). Output valid JSON only.`;
 
-const SYSTEM_PARSE_PHOTO = `Register OCR parser. Convert image rows to JSON array of objects with fields: name, phone, email, planName, startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), unitsTotal, amount, confidence. Output JSON array only.`;
+const SYSTEM_PARSE_PHOTO = `Register OCR parser. Examine the image of the physical ledger/register or document. Extract every row into a JSON array of objects with fields: name (required string), phone (digits string), email (string), planName (required string), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), unitsTotal (number), amount (number), confidence ("high"|"medium"|"low"). Output valid JSON array only.`;
 
 const SYSTEM_PARSE_DOC = `Document/Spreadsheet CRM parser. Extract every client/member record into a JSON array of objects with fields: name (required string), phone (digits string), email (string), planName (required string), startDate (ISO YYYY-MM-DD), endDate (ISO YYYY-MM-DD), unitsTotal (number), amount (number), confidence ("high"|"medium"|"low"). Output JSON array only.`;
 
