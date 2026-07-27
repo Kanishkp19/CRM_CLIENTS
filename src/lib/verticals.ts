@@ -194,27 +194,23 @@ export function getVerticalTemplate(verticalType: string): VerticalTemplate {
   return VERTICAL_TEMPLATES.find(v => v.verticalType === verticalType) ?? VERTICAL_TEMPLATES[0];
 }
 
-// Status derivation — single source of truth used by both the API scan job and the client UI.
 export function deriveEntityStatus(opts: {
   cycleType: CycleType;
   endDate: Date | null;
   unitsRemaining: number | null;
-  reminderConfig: ReminderConfig;
+  reminderConfig?: Partial<ReminderConfig> | null;
   today?: Date;
 }): "active" | "expiring_soon" | "expired" | "lapsed" {
   const today = opts.today ?? new Date();
   today.setHours(0, 0, 0, 0);
 
-  const earliestThreshold = Math.min(...(opts.reminderConfig.daysBeforeExpiry.length ? opts.reminderConfig.daysBeforeExpiry : [7]));
-  const sessionsThreshold = opts.reminderConfig.sessionsRemainingThreshold;
+  const daysBeforeExpiry = opts.reminderConfig?.daysBeforeExpiry ?? [7, 1];
+  const earliestThreshold = Math.min(...(daysBeforeExpiry.length ? daysBeforeExpiry : [7]));
+  const sessionsThreshold = opts.reminderConfig?.sessionsRemainingThreshold ?? 2;
 
   if (opts.cycleType === "count_based" || (opts.cycleType === "both" && opts.unitsRemaining != null)) {
     const u = opts.unitsRemaining ?? 0;
-    if (u <= 0) {
-      // expired if exactly 0, lapsed if it's been > 7 days since expiry — but we don't track that here precisely,
-      // so collapse to "expired" for simplicity. The daily scan job will move expired → lapsed after a grace window.
-      return "expired";
-    }
+    if (u <= 0) return "expired";
     if (u <= sessionsThreshold) return "expiring_soon";
     return "active";
   }

@@ -26,61 +26,62 @@ async function getBusinessForRequest() {
 }
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const status = url.searchParams.get("status") || "";
-  const search = url.searchParams.get("search") || "";
-  const sort = url.searchParams.get("sort") || "expiry-soon";
+  try {
+    const url = new URL(req.url);
+    const status = url.searchParams.get("status") || "";
+    const search = url.searchParams.get("search") || "";
+    const sort = url.searchParams.get("sort") || "expiry-soon";
 
-  const business = await getBusinessForRequest();
-  if (!business) return NextResponse.json({ entities: [] });
+    const business = await getBusinessForRequest();
+    if (!business) return NextResponse.json({ entities: [] });
 
-  const reminderConfig = (typeof business.reminderConfig === "string"
-    ? JSON.parse(business.reminderConfig)
-    : business.reminderConfig) as {
-    daysBeforeExpiry: number[];
-    sessionsRemainingThreshold: number;
-    sendPostExpiry: boolean;
-  };
+    const reminderConfig = typeof business.reminderConfig === "string"
+      ? JSON.parse(business.reminderConfig)
+      : business.reminderConfig;
 
-  const where: any = { businessId: business.id };
-  if (search) where.name = { contains: search };
-  if (status) where.status = status as EntityStatus;
+    const where: any = { businessId: business.id };
+    if (search) where.name = { contains: search };
+    if (status) where.status = status as EntityStatus;
 
-  let orderBy: any = { createdAt: "desc" };
-  if (sort === "name") orderBy = { name: "asc" };
+    let orderBy: any = { createdAt: "desc" };
+    if (sort === "name") orderBy = { name: "asc" };
 
-  const entities = await db.entity.findMany({
-    where,
-    orderBy,
-    include: {
-      cycles: { orderBy: { createdAt: "desc" } },
-      notifications: { orderBy: { sentAt: "desc" }, take: 50 },
-    },
-  });
-
-  const serialized = entities.map(serializeEntity);
-  const enriched = serialized.map((e) => {
-    const latestCycle = e.cycles[0];
-    const status = deriveEntityStatus({
-      cycleType: business.cycleType as any,
-      endDate: latestCycle?.endDate ? new Date(latestCycle.endDate) : null,
-      unitsRemaining: latestCycle?.unitsRemaining ?? null,
-      reminderConfig,
+    const entities = await db.entity.findMany({
+      where,
+      orderBy,
+      include: {
+        cycles: { orderBy: { createdAt: "desc" } },
+        notifications: { orderBy: { sentAt: "desc" }, take: 50 },
+      },
     });
-    return { ...e, status, latestCycle };
-  });
 
-  const filtered = status ? enriched.filter((e) => e.status === status) : enriched;
-
-  if (sort === "expiry-soon") {
-    filtered.sort((a, b) => {
-      const aDays = daysLeftForEntity(a);
-      const bDays = daysLeftForEntity(b);
-      return aDays - bDays;
+    const serialized = entities.map(serializeEntity);
+    const enriched = serialized.map((e) => {
+      const latestCycle = e.cycles[0];
+      const derivedStatus = deriveEntityStatus({
+        cycleType: business.cycleType as any,
+        endDate: latestCycle?.endDate ? new Date(latestCycle.endDate) : null,
+        unitsRemaining: latestCycle?.unitsRemaining ?? null,
+        reminderConfig,
+      });
+      return { ...e, status: derivedStatus, latestCycle };
     });
+
+    const filtered = status ? enriched.filter((e) => e.status === status) : enriched;
+
+    if (sort === "expiry-soon") {
+      filtered.sort((a, b) => {
+        const aDays = daysLeftForEntity(a);
+        const bDays = daysLeftForEntity(b);
+        return aDays - bDays;
+      });
+    }
+
+    return NextResponse.json({ entities: filtered });
+  } catch (err: any) {
+    console.error("GET /api/entities error:", err);
+    return NextResponse.json({ entities: [], error: err?.message ?? "Failed to fetch entities" });
   }
-
-  return NextResponse.json({ entities: filtered });
 }
 
 function daysLeftForEntity(e: any): number {
@@ -99,144 +100,151 @@ function daysLeftForEntity(e: any): number {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  let business = await getBusinessForRequest();
+  try {
+    const body = await req.json().catch(() => ({}));
+    let business = await getBusinessForRequest();
 
-  // Auto-provision a default business profile if the user hasn't completed onboarding yet
-  if (!business) {
-    const userId = await getAuthUserId();
-    if (userId) {
-      const tpl = getVerticalTemplate("gym")!;
-      business = await db.business.create({
-        data: {
-          ownerUserId: userId,
-          ownerName: "Business Owner",
-          name: "My Business",
-          verticalType: tpl.verticalType,
-          entityLabel: tpl.entityLabel,
-          cycleType: tpl.cycleType,
-          customFieldSchema: tpl.customFieldSchema as any,
-          reminderConfig: tpl.reminderConfig as any,
-          messageTemplates: tpl.messageTemplates as any,
-          tier: "free",
-        },
-      });
+    // Auto-provision a default business profile if the user hasn't completed onboarding yet
+    if (!business) {
+      const userId = await getAuthUserId();
+      if (userId) {
+        const tpl = getVerticalTemplate("gym");
+        business = await db.business.create({
+          data: {
+            ownerUserId: userId,
+            ownerName: "Business Owner",
+            name: "My Business",
+            verticalType: tpl.verticalType,
+            entityLabel: tpl.entityLabel,
+            cycleType: tpl.cycleType,
+            customFieldSchema: tpl.customFieldSchema as any,
+            reminderConfig: tpl.reminderConfig as any,
+            messageTemplates: tpl.messageTemplates as any,
+            tier: "free",
+          },
+        });
+      }
     }
-  }
 
-  if (!business) return NextResponse.json({ error: "No business found — onboard first" }, { status: 400 });
+    if (!business) {
+      return NextResponse.json({ error: "No business found — onboard first" }, { status: 400 });
+    }
 
-  const {
-    name, phone, email, customFields,
-    cycle,
-  } = body as {
-    name: string;
-    phone: string;
-    email?: string;
-    customFields?: Record<string, string>;
-    cycle?: {
-      planName: string;
-      startDate: string;
-      endDate?: string;
-      unitsTotal?: number;
-      amount?: number;
+    const {
+      name, phone, email, customFields,
+      cycle,
+    } = body as {
+      name: string;
+      phone: string;
+      email?: string;
+      customFields?: Record<string, string>;
+      cycle?: {
+        planName: string;
+        startDate: string;
+        endDate?: string;
+        unitsTotal?: number;
+        amount?: number;
+      };
     };
-  };
 
-  if (!name || !phone) {
-    return NextResponse.json({ error: "name and phone are required" }, { status: 400 });
-  }
+    if (!name || !phone) {
+      return NextResponse.json({ error: "name and phone are required" }, { status: 400 });
+    }
 
-  if (!cycle || !cycle.planName || !cycle.startDate) {
-    return NextResponse.json({ error: "cycle.planName and cycle.startDate are required" }, { status: 400 });
-  }
+    if (!cycle || !cycle.planName || !cycle.startDate) {
+      return NextResponse.json({ error: "cycle.planName and cycle.startDate are required" }, { status: 400 });
+    }
 
-  const start = new Date(cycle.startDate);
-  start.setHours(0, 0, 0, 0);
+    const start = new Date(cycle.startDate);
+    start.setHours(0, 0, 0, 0);
 
-  const end = cycle.endDate ? new Date(cycle.endDate) : null;
-  if (end) end.setHours(0, 0, 0, 0);
+    const end = cycle.endDate ? new Date(cycle.endDate) : null;
+    if (end) end.setHours(0, 0, 0, 0);
 
-  const unitsTotal = cycle.unitsTotal ?? null;
-  const unitsRemaining = unitsTotal;
+    const unitsTotal = cycle.unitsTotal ?? null;
+    const unitsRemaining = unitsTotal;
 
-  const reminderConfig = (typeof business.reminderConfig === "string"
-    ? JSON.parse(business.reminderConfig)
-    : business.reminderConfig) as any;
+    const reminderConfig = typeof business.reminderConfig === "string"
+      ? JSON.parse(business.reminderConfig)
+      : business.reminderConfig;
 
-  const derivedInitialStatus = deriveEntityStatus({
-    cycleType: business.cycleType as any,
-    endDate: end,
-    unitsRemaining,
-    reminderConfig,
-  });
+    const derivedInitialStatus = deriveEntityStatus({
+      cycleType: business.cycleType as any,
+      endDate: end,
+      unitsRemaining,
+      reminderConfig,
+    });
 
-  const created = await db.entity.create({
-    data: {
-      businessId: business.id,
-      name,
-      phone,
-      email: email ?? null,
-      customFields: (customFields ?? {}) as any,
-      status: derivedInitialStatus,
-      cycles: {
-        create: {
-          planName: cycle.planName,
-          startDate: start,
-          endDate: end,
-          unitsTotal,
-          unitsRemaining,
-          amount: cycle.amount ?? null,
-          status: "active",
+    const created = await db.entity.create({
+      data: {
+        businessId: business.id,
+        name,
+        phone,
+        email: email ?? null,
+        customFields: (customFields ?? {}) as any,
+        status: derivedInitialStatus,
+        cycles: {
+          create: {
+            planName: cycle.planName,
+            startDate: start,
+            endDate: end,
+            unitsTotal,
+            unitsRemaining,
+            amount: cycle.amount ?? null,
+            status: "active",
+          },
         },
       },
-    },
-    include: {
-      cycles: { orderBy: { createdAt: "desc" } },
-      notifications: { orderBy: { sentAt: "desc" }, take: 50 },
-    },
-  });
+      include: {
+        cycles: { orderBy: { createdAt: "desc" } },
+        notifications: { orderBy: { sentAt: "desc" }, take: 50 },
+      },
+    });
 
-  const templates = (typeof business.messageTemplates === "string"
-    ? JSON.parse(business.messageTemplates)
-    : business.messageTemplates) as any;
+    const templates = typeof business.messageTemplates === "string"
+      ? JSON.parse(business.messageTemplates)
+      : business.messageTemplates;
 
-  const msg = (templates?.registration as string || "Welcome to {{business}}!")
-    .replace(/{{name}}/g, name)
-    .replace(/{{business}}/g, business.name)
-    .replace(/{{plan}}/g, cycle.planName)
-    .replace(/{{days_left}}/g, end ? String(daysBetween(start, end)) : "")
-    .replace(/{{units_remaining}}/g, unitsRemaining != null ? String(unitsRemaining) : "")
-    .replace(/{{start_date}}/g, cycle.startDate)
-    .replace(/{{end_date}}/g, cycle.endDate ?? "");
+    const msg = (templates?.registration as string || "Welcome to {{business}}!")
+      .replace(/{{name}}/g, name)
+      .replace(/{{business}}/g, business.name)
+      .replace(/{{plan}}/g, cycle.planName)
+      .replace(/{{days_left}}/g, end ? String(daysBetween(start, end)) : "")
+      .replace(/{{units_remaining}}/g, unitsRemaining != null ? String(unitsRemaining) : "")
+      .replace(/{{start_date}}/g, cycle.startDate)
+      .replace(/{{end_date}}/g, cycle.endDate ?? "");
 
-  const dispatch = await sendNotificationMessage({
-    toEmail: email,
-    toPhone: phone,
-    subject: `Welcome to ${business.name}`,
-    bodyText: msg,
-    businessName: business.name,
-  });
+    const dispatch = await sendNotificationMessage({
+      toEmail: email,
+      toPhone: phone,
+      subject: `Welcome to ${business.name}`,
+      bodyText: msg,
+      businessName: business.name,
+    });
 
-  await db.notificationLog.create({
-    data: {
-      entityId: created.id,
-      cycleId: created.cycles[0].id,
-      channel: dispatch.channel,
-      triggerType: "registration",
-      message: msg,
-      status: dispatch.status,
-    },
-  });
+    await db.notificationLog.create({
+      data: {
+        entityId: created.id,
+        cycleId: created.cycles[0].id,
+        channel: dispatch.channel,
+        triggerType: "registration",
+        message: msg,
+        status: dispatch.status,
+      },
+    });
 
-  const refreshed = await db.entity.findUnique({
-    where: { id: created.id },
-    include: {
-      cycles: { orderBy: { createdAt: "desc" } },
-      notifications: { orderBy: { sentAt: "desc" }, take: 50 },
-    },
-  });
-  return NextResponse.json({ entity: serializeEntity(refreshed!) });
+    const refreshed = await db.entity.findUnique({
+      where: { id: created.id },
+      include: {
+        cycles: { orderBy: { createdAt: "desc" } },
+        notifications: { orderBy: { sentAt: "desc" }, take: 50 },
+      },
+    });
+    return NextResponse.json({ entity: serializeEntity(refreshed!) });
+  } catch (err: any) {
+    console.error("POST /api/entities error:", err);
+    return NextResponse.json({ error: err?.message ?? "Failed to create client entity" }, { status: 500 });
+  }
 }
 
 function daysBetween(a: Date, b: Date): number {
