@@ -1,0 +1,90 @@
+// Cycle — Universal Membership & Lifecycle CRM
+// Prisma schema adapted from TRD §3.
+// One codebase, one schema, one reminder engine. New verticals = config, never new tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// A business (one per owner in v1). Vertical-agnostic — vertical identity lives in `verticalType`,
+/// `entityLabel`, `cycleType`, `customFieldSchema`, `reminderConfig`, `messageTemplates`.
+model Business {
+  id                 String   @id @default(cuid())
+  ownerUserId        String   @default("demo-user") @map("owner_user_id") // maps to Supabase auth.users id
+  ownerName          String   @map("owner_name")
+  name               String
+  verticalType       String   @map("vertical_type") // gym | tuition | salon | pet_daycare | amc | rental
+  entityLabel        String   @map("entity_label") // "Member" | "Student" | "Pet" | "Client" — display only
+  cycleType          String   @default("date_based") @map("cycle_type") // date_based | count_based | both
+  customFieldSchema  String   @default("[]") @map("custom_field_schema") // JSON: {"breed":"text","vaccination_date":"date"}
+  reminderConfig     String   @default("{}") @map("reminder_config") // JSON: {"daysBeforeExpiry":[7,1],"sessionsRemainingThreshold":2}
+  messageTemplates   String   @default("{}") @map("message_templates") // JSON: {registration:..., preExpiry:..., expiryDay:..., postExpiry:...}
+  tier               String   @default("free") // free | starter | growth | custom
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  entities Entity[]
+
+  @@map("businesses")
+}
+
+/// A client / member / pet / asset — same model for every vertical.
+model Entity {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  name          String
+  phone         String
+  email         String?
+  customFields  String   @default("{}") @map("custom_fields") // JSON, keyed per Business.customFieldSchema
+  status        String   @default("active") // active | expiring_soon | expired | lapsed (derived, cached)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cycles        Cycle[]
+  notifications NotificationLog[]
+
+  @@map("entities")
+}
+
+/// A time-bound or count-bound lifecycle unit attached to an entity.
+model Cycle {
+  id              String   @id @default(cuid())
+  entityId        String   @map("entity_id")
+  planName        String   @map("plan_name") // "3-month membership", "10-session package"
+  startDate       DateTime @map("start_date")
+  endDate         DateTime? @map("end_date") // nullable — used for date_based
+  unitsTotal      Int?     @map("units_total") // nullable — used for count_based (e.g. 10 sessions)
+  unitsRemaining Int?      @map("units_remaining") // nullable, decremented on usage
+  status          String   @default("active") // active | completed | renewed | lapsed
+  amount          Float?   // optional, for owner's own record-keeping
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  entity          Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  notifications    NotificationLog[]
+
+  @@map("cycles")
+}
+
+/// Audit log of every outbound WhatsApp / email notification.
+model NotificationLog {
+  id           String   @id @default(cuid())
+  entityId     String   @map("entity_id")
+  cycleId      String?  @map("cycle_id")
+  channel      String   // whatsapp | email
+  triggerType  String   @map("trigger_type") // registration | pre_expiry | expiry_day | post_expiry
+  message      String
+  sentAt       DateTime @default(now()) @map("sent_at")
+  status       String   @default("sent") // sent | failed
+
+  entity       Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  cycle        Cycle?   @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+
+  @@map("notifications_log")
+}
