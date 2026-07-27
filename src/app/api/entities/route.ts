@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { serializeEntity } from "@/lib/serialize";
-import { deriveEntityStatus } from "@/lib/verticals";
+import { deriveEntityStatus, getVerticalTemplate } from "@/lib/verticals";
 import { sendNotificationMessage } from "@/lib/messaging";
 import type { EntityStatus } from "@/lib/types";
 
@@ -100,7 +100,30 @@ function daysLeftForEntity(e: any): number {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const business = await getBusinessForRequest();
+  let business = await getBusinessForRequest();
+
+  // Auto-provision a default business profile if the user hasn't completed onboarding yet
+  if (!business) {
+    const userId = await getAuthUserId();
+    if (userId) {
+      const tpl = getVerticalTemplate("gym")!;
+      business = await db.business.create({
+        data: {
+          ownerUserId: userId,
+          ownerName: "Business Owner",
+          name: "My Business",
+          verticalType: tpl.verticalType,
+          entityLabel: tpl.entityLabel,
+          cycleType: tpl.cycleType,
+          customFieldSchema: tpl.customFieldSchema as any,
+          reminderConfig: tpl.reminderConfig as any,
+          messageTemplates: tpl.messageTemplates as any,
+          tier: "free",
+        },
+      });
+    }
+  }
+
   if (!business) return NextResponse.json({ error: "No business found — onboard first" }, { status: 400 });
 
   const {
