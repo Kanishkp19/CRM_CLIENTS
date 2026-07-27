@@ -1,5 +1,5 @@
 // GET  /api/business  -> current business for authenticated owner only
-// POST /api/business  -> create business for authenticated owner
+// POST /api/business  -> create or return existing business for authenticated owner
 // PATCH /api/business -> update business settings for authenticated owner
 
 import { NextRequest, NextResponse } from "next/server";
@@ -65,6 +65,12 @@ export async function POST(req: NextRequest) {
 
   if (!userId) {
     return NextResponse.json({ error: "Could not associate business with an owner account" }, { status: 400 });
+  }
+
+  // Idempotency check: If business already exists for this owner, return it directly
+  const existing = await db.business.findFirst({ where: { ownerUserId: userId } });
+  if (existing) {
+    return NextResponse.json({ business: serializeBusiness(existing) });
   }
 
   const template = getVerticalTemplate(verticalType);

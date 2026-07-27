@@ -15,28 +15,34 @@ export default function Home() {
   const setBusiness = useAppStore((s) => s.setBusiness);
   const isLoadingBusiness = useAppStore((s) => s.isLoadingBusiness);
 
+  // Helper to fetch current user's business profile
+  async function fetchUserBusiness() {
+    try {
+      const res = await fetch("/api/business");
+      const json = await res.json();
+      return json.business ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   // On first mount: check if a business exists for the user in the DB.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch("/api/business");
-        const json = await res.json();
-        if (!cancelled) {
-          setBusiness(json.business);
-          const currentView = useAppStore.getState().view;
-          if (json.business) {
-            if (currentView === "marketing" || currentView === "auth") {
-              useAppStore.getState().setView("dashboard");
-            }
-          } else {
-            if (currentView !== "onboarding" && currentView !== "auth") {
-              useAppStore.getState().setView("marketing");
-            }
+      const b = await fetchUserBusiness();
+      if (!cancelled) {
+        setBusiness(b);
+        const currentView = useAppStore.getState().view;
+        if (b) {
+          if (currentView === "marketing" || currentView === "auth" || currentView === "onboarding") {
+            useAppStore.getState().setView("dashboard");
+          }
+        } else {
+          if (currentView !== "onboarding" && currentView !== "auth") {
+            useAppStore.getState().setView("marketing");
           }
         }
-      } catch {
-        if (!cancelled) setBusiness(null);
       }
     })();
     return () => { cancelled = true; };
@@ -65,10 +71,16 @@ export default function Home() {
       return (
         <AuthView
           onSuccess={async () => {
-            const res = await fetch("/api/business");
-            const json = await res.json();
-            setBusiness(json.business);
-            if (json.business) {
+            // Small delay to allow Supabase SSR cookies to sync
+            await new Promise((r) => setTimeout(r, 200));
+            let b = await fetchUserBusiness();
+            if (!b) {
+              // Retry once to ensure cookie propagation
+              await new Promise((r) => setTimeout(r, 400));
+              b = await fetchUserBusiness();
+            }
+            setBusiness(b);
+            if (b) {
               useAppStore.getState().setView("dashboard");
             } else {
               useAppStore.getState().setView("onboarding");
