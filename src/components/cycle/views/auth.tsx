@@ -40,10 +40,12 @@ export function AuthView({ onSuccess }: AuthProps) {
 
     try {
       if (isSignUp) {
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
+            emailRedirectTo: origin ? `${origin}` : undefined,
             data: {
               owner_name: ownerName || email.split("@")[0],
             },
