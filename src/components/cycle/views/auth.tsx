@@ -17,8 +17,8 @@ export function AuthView({ onSuccess }: AuthProps) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const isPlaceholderUrl = !supabaseUrl || supabaseUrl.includes("placeholder");
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "https://jahpfyymdiboccvcdkcj.supabase.co";
+  const isPlaceholderUrl = false;
 
   const supabase = createClient();
 

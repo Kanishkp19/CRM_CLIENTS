@@ -332,18 +332,18 @@ export function AddEntityModal() {
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
-          <TabsList className="grid w-full grid-cols-4 text-xs sm:text-sm">
-            <TabsTrigger value="text" className="flex items-center gap-1">
-              <Sparkles className="h-3.5 w-3.5" /> AI Parse
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto p-1.5 gap-1.5 bg-[var(--canvas-soft)] border border-[var(--hairline)] rounded-lg">
+            <TabsTrigger value="text" className="flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-medium">
+              <Sparkles className="h-3.5 w-3.5 text-[var(--brand)] shrink-0" /> AI Parse
             </TabsTrigger>
-            <TabsTrigger value="photo" className="flex items-center gap-1">
-              <Camera className="h-3.5 w-3.5" /> Photo OCR
+            <TabsTrigger value="photo" className="flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-medium">
+              <Camera className="h-3.5 w-3.5 shrink-0" /> Photo OCR
             </TabsTrigger>
-            <TabsTrigger value="doc" className="flex items-center gap-1">
-              <FileSpreadsheet className="h-3.5 w-3.5" /> Doc / Sheet
+            <TabsTrigger value="doc" className="flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-medium">
+              <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" /> Doc / Sheet
             </TabsTrigger>
-            <TabsTrigger value="manual" className="flex items-center gap-1">
-              <FileText className="h-3.5 w-3.5" /> Manual
+            <TabsTrigger value="manual" className="flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-medium">
+              <FileText className="h-3.5 w-3.5 shrink-0" /> Manual
             </TabsTrigger>
           </TabsList>
 
