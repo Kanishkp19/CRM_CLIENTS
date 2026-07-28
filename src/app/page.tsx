@@ -19,7 +19,7 @@ export default function Home() {
   async function fetchUserBusiness() {
     try {
       const res = await fetch("/api/business");
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       return json.business ?? null;
     } catch {
       return null;

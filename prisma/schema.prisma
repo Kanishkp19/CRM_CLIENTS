@@ -2,13 +2,15 @@
 // Production Hardened Prisma Schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+  schemas   = ["public", "auth"]
 }
 
 /// A business (one per owner in v1). Vertical-agnostic.
@@ -30,6 +32,7 @@ model Business {
   entities Entity[]
 
   @@map("businesses")
+  @@schema("public")
 }
 
 /// A client / member / pet / asset — same model for every vertical.
@@ -49,6 +52,7 @@ model Entity {
   notifications NotificationLog[]
 
   @@map("entities")
+  @@schema("public")
 }
 
 /// A time-bound or count-bound lifecycle unit attached to an entity.
@@ -68,6 +72,7 @@ model Cycle {
   notifications    NotificationLog[]
 
   @@map("cycles")
+  @@schema("public")
 }
 
 /// Audit log of every outbound WhatsApp / email notification with atomic deduplication.
@@ -86,4 +91,5 @@ model NotificationLog {
   cycle        Cycle?   @relation(fields: [cycleId], references: [id], onDelete: SetNull)
 
   @@map("notifications_log")
+  @@schema("public")
 }

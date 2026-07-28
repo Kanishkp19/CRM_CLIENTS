@@ -83,7 +83,7 @@ export function MarketingView() {
               Sign in
             </button>
             <button
-              onClick={() => setView("onboarding")}
+              onClick={() => setView("auth")}
               className="rounded-md bg-[var(--brand)] px-3.5 py-1.5 text-xs sm:text-sm font-medium text-[var(--on-primary)] transition hover:bg-[var(--brand-deep)]"
             >
               Start free
@@ -108,7 +108,7 @@ export function MarketingView() {
 
         <div className="mt-6 sm:mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row w-full sm:w-auto">
           <button
-            onClick={() => setView("onboarding")}
+            onClick={() => setView("auth")}
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-md bg-[var(--brand)] px-5 py-2.5 text-sm font-medium text-[var(--on-primary)] transition hover:bg-[var(--brand-deep)]"
           >
             Start free <ArrowRight className="h-4 w-4" />
@@ -146,7 +146,6 @@ export function MarketingView() {
                 <div className="nav-active flex items-center gap-2 -ml-px border-l-2 pl-3 py-1.5 text-[var(--ink)]">
                   <Dumbbell className="h-3.5 w-3.5" /> Members
                 </div>
-                <div className="pl-3 py-1.5 text-[var(--ink-mute)]">Activity log</div>
                 <div className="pl-3 py-1.5 text-[var(--ink-mute)]">Settings</div>
               </nav>
             </div>
@@ -238,7 +237,7 @@ export function MarketingView() {
 
           <div className="mt-10 text-center">
             <button
-              onClick={() => setView("onboarding")}
+              onClick={() => setView("auth")}
               className="inline-flex items-center gap-2 rounded-md bg-[var(--ink)] px-5 py-2.5 text-sm font-medium text-[var(--canvas)] hover:opacity-90"
             >
               Set up your business <ArrowRight className="h-4 w-4" />
@@ -333,7 +332,12 @@ export function MarketingView() {
                 </div>
               ))}
             </div>
-            <button className="mt-3 w-full rounded-md bg-[var(--brand)] py-2 text-sm font-medium text-[var(--on-primary)]">
+            <button
+              type="button"
+              onClick={(e) => e.preventDefault()}
+              title="This is a preview — sign up to use the real thing"
+              className="mt-3 w-full rounded-md bg-[var(--brand)] py-2 text-sm font-medium text-[var(--on-primary)] cursor-default opacity-90"
+            >
               Confirm &amp; save
             </button>
           </div>
@@ -386,7 +390,7 @@ export function MarketingView() {
                   ))}
                 </ul>
                 <button
-                  onClick={() => setView("onboarding")}
+                  onClick={() => setView("auth")}
                   className={
                     "mt-6 rounded-md py-2 text-sm font-medium transition " +
                     (p.featured
@@ -403,13 +407,24 @@ export function MarketingView() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-[var(--hairline)] py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 text-sm text-[var(--ink-mute)] md:flex-row">
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-4 w-4 rounded-full bg-[var(--brand)]" />
-            <span>Cycle · Universal Membership & Lifecycle CRM</span>
+      <footer className="border-t border-[var(--hairline)] bg-[var(--canvas-soft)] py-10">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-4 w-4 rounded-full bg-[var(--brand)]" aria-hidden />
+              <span className="text-sm font-medium">Cycle</span>
+              <span className="text-sm text-[var(--ink-mute)]">· Universal Membership &amp; Lifecycle CRM</span>
+            </div>
+            <nav className="flex flex-wrap items-center justify-center gap-4 text-sm text-[var(--ink-mute)]">
+              <a href="/privacy" className="hover:text-[var(--ink)] transition">Privacy Policy</a>
+              <a href="/terms" className="hover:text-[var(--ink)] transition">Terms of Service</a>
+              <a href="mailto:hello@cyclecrm.app" className="hover:text-[var(--ink)] transition">Contact</a>
+            </nav>
           </div>
-          <p className="caption">Pre-build · v0.1</p>
+          <div className="mt-6 border-t border-[var(--hairline)] pt-6 flex flex-col items-center justify-between gap-2 md:flex-row">
+            <p className="text-xs text-[var(--ink-mute)]">© {new Date().getFullYear()} Cycle CRM. All rights reserved.</p>
+            <p className="text-xs text-[var(--ink-mute-2)]">v0.1 · Pre-release</p>
+          </div>
         </div>
       </footer>
     </div>

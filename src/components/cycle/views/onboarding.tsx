@@ -72,9 +72,9 @@ export function OnboardingView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ownerName: ownerName.trim(), name: businessName.trim(), verticalType }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json?.error ?? "Failed to create business profile");
+        throw new Error(json?.error ?? `Failed to create business profile (${res.status})`);
       }
       setBusiness(json.business);
 
@@ -86,7 +86,7 @@ export function OnboardingView() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tone }),
         });
-        const draftJson = await draftRes.json();
+        const draftJson = await draftRes.json().catch(() => ({}));
         if (draftRes.ok && draftJson.business) {
           setBusiness(draftJson.business);
         }
@@ -117,8 +117,8 @@ export function OnboardingView() {
     setSubmitting(true);
     try {
       const res = await fetch("/api/seed", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Seed failed");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? `Seed failed (${res.status})`);
       setBusiness(json.business);
       setView("dashboard");
       toast({
@@ -272,19 +272,19 @@ export function OnboardingView() {
                 <ul className="space-y-1 text-sm">
                   <li className="flex justify-between">
                     <span className="text-[var(--ink-mute)]">Entity label</span>
-                    <span className="font-mono">{template.entityLabel}</span>
+                    <span className="font-medium">{template.entityLabel}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-[var(--ink-mute)]">Cycle type</span>
-                    <span className="font-mono">{template.cycleType.replace("_", "-")}</span>
+                    <span className="font-medium">{template.cycleType.replace("_", "-")}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-[var(--ink-mute)]">Default plan</span>
-                    <span className="font-mono">{template.defaultPlanName}</span>
+                    <span className="font-medium">{template.defaultPlanName}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-[var(--ink-mute)]">Reminders sent</span>
-                    <span className="font-mono">
+                    <span className="font-medium">
                       {template.reminderConfig.daysBeforeExpiry.join(", ")} day(s) before
                     </span>
                   </li>

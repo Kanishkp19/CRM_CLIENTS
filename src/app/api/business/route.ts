@@ -5,7 +5,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getVerticalTemplate } from "@/lib/verticals";
 import { serializeBusiness } from "@/lib/serialize";
 import type { CycleType, Tier } from "@/lib/types";
@@ -50,20 +49,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let userId = await getAuthUserId();
+  const userId = await getAuthUserId();
   if (!userId) {
-    try {
-      const admin = createAdminClient();
-      const { data: newUser } = await admin.auth.admin.createUser({
-        email: `owner_${Date.now()}@cyclecrm.app`,
-        email_confirm: true,
-      });
-      if (newUser?.user?.id) userId = newUser.user.id;
-    } catch {}
-  }
-
-  if (!userId) {
-    return NextResponse.json({ error: "Could not associate business with an owner account" }, { status: 400 });
+    return NextResponse.json({ error: "Unauthorized — please sign in before setting up your business" }, { status: 401 });
   }
 
   const existing = await db.business.findFirst({ where: { ownerUserId: userId } });

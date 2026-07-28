@@ -3,16 +3,29 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { serializeBusiness } from "@/lib/serialize";
+import { createClient } from "@/lib/supabase/server";
 import { sendNotificationMessage } from "@/lib/messaging";
 
 export async function POST(_req: NextRequest) {
+  // Auth guard — only authenticated owners can trigger their own scan
+  let userId: string | null = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    userId = data.user?.id ?? null;
+  } catch {}
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayIso = today.toISOString().slice(0, 10);
   const msPerDay = 1000 * 60 * 60 * 24;
 
-  const businesses = await db.business.findMany();
+  // Scope to authenticated user's business only
+  const businesses = await db.business.findMany({ where: { ownerUserId: userId } });
   if (!businesses.length) return NextResponse.json({ summary: { scanned: 0 } });
 
   let totalScanned = 0;

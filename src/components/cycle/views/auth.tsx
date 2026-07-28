@@ -8,6 +8,12 @@ interface AuthProps {
   onSuccess?: () => void;
 }
 
+interface FieldErrors {
+  ownerName?: string;
+  email?: string;
+  password?: string;
+}
+
 export function AuthView({ onSuccess }: AuthProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -16,38 +22,63 @@ export function AuthView({ onSuccess }: AuthProps) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "https://jahpfyymdiboccvcdkcj.supabase.co";
-  const isPlaceholderUrl = false;
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const supabase = createClient();
 
+  function validateFields(): FieldErrors {
+    const errors: FieldErrors = {};
+
+    if (isSignUp && !ownerName.trim()) {
+      errors.ownerName = "Please enter your name.";
+    }
+
+    if (!email.trim()) {
+      errors.email = "Email address is required.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      errors.email = "Please enter a valid email address.";
+    }
+
+    if (!password) {
+      errors.password = "Password is required.";
+    } else if (password.length < 6) {
+      errors.password = "Password must be at least 6 characters.";
+    }
+
+    return errors;
+  }
+
+  function handleBlur(field: string) {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    const errors = validateFields();
+    setFieldErrors(errors);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Mark all fields as touched so errors appear
+    setTouched({ ownerName: true, email: true, password: true });
+    const errors = validateFields();
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) return;
+
     setLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
-
-    if (isPlaceholderUrl) {
-      // In local demo mode without live Supabase keys, simulate successful auth
-      setTimeout(() => {
-        setLoading(false);
-        setSuccessMsg("Signed in (Demo Mode)");
-        if (onSuccess) onSuccess();
-      }, 500);
-      return;
-    }
 
     try {
       if (isSignUp) {
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         const { data, error } = await supabase.auth.signUp({
-          email,
+          email: email.trim(),
           password,
           options: {
             emailRedirectTo: origin ? `${origin}` : "https://crm-clients-eight.vercel.app",
             data: {
-              owner_name: ownerName || email.split("@")[0],
+              owner_name: ownerName.trim() || email.split("@")[0],
             },
           },
         });
@@ -62,7 +93,7 @@ export function AuthView({ onSuccess }: AuthProps) {
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password,
         });
 
@@ -80,6 +111,21 @@ export function AuthView({ onSuccess }: AuthProps) {
     }
   }
 
+  function switchMode() {
+    setIsSignUp(!isSignUp);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setFieldErrors({});
+    setTouched({});
+    setOwnerName("");
+    setEmail("");
+    setPassword("");
+  }
+
+  const showOwnerError = touched.ownerName && fieldErrors.ownerName;
+  const showEmailError = touched.email && fieldErrors.email;
+  const showPasswordError = touched.password && fieldErrors.password;
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#fafafa] px-4 py-12">
       <div className="w-full max-w-md bg-white border border-[#dfdfdf] rounded-xl p-8 shadow-sm">
@@ -92,25 +138,14 @@ export function AuthView({ onSuccess }: AuthProps) {
             {isSignUp ? "Create your business account" : "Sign in to your dashboard"}
           </h1>
           <p className="text-sm text-[#707070] mt-1">
-            Universal Membership & Lifecycle CRM
+            Universal Membership &amp; Lifecycle CRM
           </p>
         </div>
 
-        {isPlaceholderUrl && (
-          <div className="mb-6 p-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-md flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium">Supabase Project URL not set in .env</p>
-              <p className="mt-0.5 text-amber-700">
-                You can sign in using Demo Mode below, or add your Supabase credentials to <code className="bg-amber-100 px-1 rounded text-amber-900">.env</code> to connect a live Supabase project.
-              </p>
-            </div>
-          </div>
-        )}
-
         {errorMsg && (
-          <div className="mb-6 p-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-md">
-            {errorMsg}
+          <div className="mb-6 p-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-md flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />
+            <span>{errorMsg}</span>
           </div>
         )}
 
@@ -121,7 +156,7 @@ export function AuthView({ onSuccess }: AuthProps) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {isSignUp && (
             <div>
               <label className="block text-xs font-medium text-[#171717] mb-1">
@@ -131,13 +166,18 @@ export function AuthView({ onSuccess }: AuthProps) {
                 <User className="w-4 h-4 text-[#9a9a9a] absolute left-3 top-3" />
                 <input
                   type="text"
-                  required={!isPlaceholderUrl}
                   placeholder="e.g. Ramesh Kumar"
                   value={ownerName}
                   onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-[#dfdfdf] rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717]"
+                  onBlur={() => handleBlur("ownerName")}
+                  className={`w-full pl-9 pr-3 py-2 text-sm border rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717] transition ${
+                    showOwnerError ? "border-red-400 bg-red-50" : "border-[#dfdfdf]"
+                  }`}
                 />
               </div>
+              {showOwnerError && (
+                <p className="mt-1 text-xs text-red-600">{fieldErrors.ownerName}</p>
+              )}
             </div>
           )}
 
@@ -149,13 +189,18 @@ export function AuthView({ onSuccess }: AuthProps) {
               <Mail className="w-4 h-4 text-[#9a9a9a] absolute left-3 top-3" />
               <input
                 type="email"
-                required={!isPlaceholderUrl}
                 placeholder="owner@business.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-[#dfdfdf] rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717]"
+                onBlur={() => handleBlur("email")}
+                className={`w-full pl-9 pr-3 py-2 text-sm border rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717] transition ${
+                  showEmailError ? "border-red-400 bg-red-50" : "border-[#dfdfdf]"
+                }`}
               />
             </div>
+            {showEmailError && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>
+            )}
           </div>
 
           <div>
@@ -166,13 +211,18 @@ export function AuthView({ onSuccess }: AuthProps) {
               <Lock className="w-4 h-4 text-[#9a9a9a] absolute left-3 top-3" />
               <input
                 type="password"
-                required={!isPlaceholderUrl}
-                placeholder="••••••••"
+                placeholder="Min. 6 characters"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-[#dfdfdf] rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717]"
+                onBlur={() => handleBlur("password")}
+                className={`w-full pl-9 pr-3 py-2 text-sm border rounded-md focus:outline-none focus:border-[#3ecf8e] text-[#171717] transition ${
+                  showPasswordError ? "border-red-400 bg-red-50" : "border-[#dfdfdf]"
+                }`}
               />
             </div>
+            {showPasswordError && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p>
+            )}
           </div>
 
           <button
@@ -184,30 +234,24 @@ export function AuthView({ onSuccess }: AuthProps) {
               <RefreshCw className="w-4 h-4 animate-spin text-[#171717]" />
             ) : (
               <>
-                <span>{isPlaceholderUrl ? "Continue in Demo Mode" : isSignUp ? "Create Account" : "Sign In"}</span>
+                <span>{isSignUp ? "Create Account" : "Sign In"}</span>
                 <ArrowRight className="w-4 h-4 text-[#171717]" />
               </>
             )}
           </button>
         </form>
 
-        {!isPlaceholderUrl && (
-          <div className="mt-6 pt-6 border-t border-[#dfdfdf] text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setErrorMsg(null);
-                setSuccessMsg(null);
-              }}
-              className="text-xs text-[#707070] hover:text-[#171717] transition cursor-pointer"
-            >
-              {isSignUp
-                ? "Already have an account? Sign in"
-                : "Don't have an account yet? Create one"}
-            </button>
-          </div>
-        )}
+        <div className="mt-6 pt-6 border-t border-[#dfdfdf] text-center">
+          <button
+            type="button"
+            onClick={switchMode}
+            className="text-xs text-[#707070] hover:text-[#171717] transition cursor-pointer"
+          >
+            {isSignUp
+              ? "Already have an account? Sign in"
+              : "Don't have an account yet? Create one"}
+          </button>
+        </div>
       </div>
     </div>
   );

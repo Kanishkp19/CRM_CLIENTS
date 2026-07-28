@@ -18,9 +18,11 @@ export async function POST(req: NextRequest) {
     userId = data.user?.id ?? null;
   } catch {}
 
-  const business = userId
-    ? await db.business.findFirst({ where: { ownerUserId: userId } })
-    : await db.business.findFirst({ orderBy: { createdAt: "desc" } });
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const business = await db.business.findFirst({ where: { ownerUserId: userId } });
 
   if (!business) return NextResponse.json({ error: "No business found" }, { status: 404 });
 

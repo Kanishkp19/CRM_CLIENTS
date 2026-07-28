@@ -253,25 +253,29 @@ export function DashboardView() {
         {/* Filter & Search Bar */}
         <div className="border-b border-[var(--hairline)] bg-[var(--canvas)] px-4 sm:px-6 py-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            {/* Scrollable chip filters on mobile */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-              {STATUS_FILTERS.map((f) => {
-                const isActive = statusFilter === f.value;
-                return (
-                  <button
-                    key={f.value || "all"}
-                    onClick={() => setStatusFilter(f.value)}
-                    className={
-                      "whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition shrink-0 " +
-                      (isActive
-                        ? "bg-[var(--brand)] text-[var(--on-primary)]"
-                        : "border border-[var(--hairline)] text-[var(--ink-mute)] hover:bg-[var(--canvas-soft)]")
-                    }
-                  >
-                    {f.label}
-                  </button>
-                );
-              })}
+            {/* Scrollable chip filters on mobile — fade gradient shows more chips exist */}
+            <div className="relative">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none pr-6">
+                {STATUS_FILTERS.map((f) => {
+                  const isActive = statusFilter === f.value;
+                  return (
+                    <button
+                      key={f.value || "all"}
+                      onClick={() => setStatusFilter(f.value)}
+                      className={
+                        "whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition shrink-0 " +
+                        (isActive
+                          ? "bg-[var(--brand)] text-[var(--on-primary)]"
+                          : "border border-[var(--hairline)] text-[var(--ink-mute)] hover:bg-[var(--canvas-soft)]")
+                      }
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Right fade to hint at more chips on mobile */}
+              <div className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-[var(--canvas)] to-transparent md:hidden" />
             </div>
 
             <div className="flex items-center gap-2 w-full md:w-auto">
