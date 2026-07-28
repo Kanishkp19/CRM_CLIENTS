@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useAppStore } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,6 +31,11 @@ export function AddEntityModal() {
   const bumpDataVersion = useAppStore((s) => s.bumpDataVersion);
   const business = useAppStore((s) => s.business);
   const { toast } = useToast();
+
+  // Mutex ref — prevents duplicate submissions on rapid clicks
+  // useRef gives instant reads/writes without triggering re-renders
+  const submittingRef = useRef(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [tab, setTab] = useState<"text" | "photo" | "doc" | "manual">("text");
 
@@ -171,147 +176,179 @@ export function AddEntityModal() {
   }
 
   async function saveManual() {
+    if (submittingRef.current) return; // Duplicate click guard
     if (!manual.name || !manual.planName) {
       toast({ title: "Name and plan are required", variant: "destructive" });
       return;
     }
-    const res = await fetch("/api/entities", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: manual.name,
-        phone: manual.phone,
-        email: manual.email || undefined,
-        customFields: manual.customFields,
-        cycle: {
-          planName: manual.planName,
-          startDate: manual.startDate,
-          endDate: manual.endDate || undefined,
-          unitsTotal: manual.unitsTotal ? Number(manual.unitsTotal) : undefined,
-          amount: manual.amount ? Number(manual.amount) : undefined,
-        },
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      toast({ title: "Save failed", description: json?.error, variant: "destructive" });
-      return;
+    submittingRef.current = true;
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/entities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: manual.name,
+          phone: manual.phone,
+          email: manual.email || undefined,
+          customFields: manual.customFields,
+          cycle: {
+            planName: manual.planName,
+            startDate: manual.startDate,
+            endDate: manual.endDate || undefined,
+            unitsTotal: manual.unitsTotal ? Number(manual.unitsTotal) : undefined,
+            amount: manual.amount ? Number(manual.amount) : undefined,
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast({ title: "Save failed", description: json?.error, variant: "destructive" });
+        return;
+      }
+      upsertEntity(json.entity);
+      bumpDataVersion();
+      toast({ title: `${manual.name} added`, description: "Registration notification sent." });
+      resetAll();
+      close();
+    } finally {
+      submittingRef.current = false;
+      setIsSaving(false);
     }
-    upsertEntity(json.entity);
-    bumpDataVersion();
-    toast({ title: `${manual.name} added`, description: "Registration email/notification sent." });
-    resetAll();
-    close();
   }
 
   async function saveVoiceDraft() {
+    if (submittingRef.current) return; // Duplicate click guard
     if (!voiceDraft || !voiceDraft.name || !voiceDraft.planName) {
       toast({ title: "Name and plan are required", variant: "destructive" });
       return;
     }
-    const res = await fetch("/api/entities", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: voiceDraft.name,
-        phone: voiceDraft.phone,
-        email: voiceDraft.email,
-        customFields: voiceDraft.customFields ?? {},
-        cycle: {
-          planName: voiceDraft.planName,
-          startDate: voiceDraft.startDate,
-          endDate: voiceDraft.endDate,
-          unitsTotal: voiceDraft.unitsTotal,
-          amount: voiceDraft.amount,
-        },
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      toast({ title: "Save failed", description: json?.error, variant: "destructive" });
-      return;
+    submittingRef.current = true;
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/entities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: voiceDraft.name,
+          phone: voiceDraft.phone,
+          email: voiceDraft.email,
+          customFields: voiceDraft.customFields ?? {},
+          cycle: {
+            planName: voiceDraft.planName,
+            startDate: voiceDraft.startDate,
+            endDate: voiceDraft.endDate,
+            unitsTotal: voiceDraft.unitsTotal,
+            amount: voiceDraft.amount,
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast({ title: "Save failed", description: json?.error, variant: "destructive" });
+        return;
+      }
+      upsertEntity(json.entity);
+      bumpDataVersion();
+      toast({ title: `${voiceDraft.name} added`, description: "Registration notification sent." });
+      resetAll();
+      close();
+    } finally {
+      submittingRef.current = false;
+      setIsSaving(false);
     }
-    upsertEntity(json.entity);
-    bumpDataVersion();
-    toast({ title: `${voiceDraft.name} added`, description: "Registration email/notification sent." });
-    resetAll();
-    close();
   }
 
   async function savePhotoDrafts() {
+    if (submittingRef.current) return; // Duplicate click guard
     const active = photoDrafts.filter((_, i) => !excludedIdx.has(i));
     if (active.length === 0) {
       toast({ title: "No entries selected", variant: "destructive" });
       return;
     }
-    let ok = 0;
-    for (const d of active) {
-      const res = await fetch("/api/entities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: d.name,
-          phone: d.phone,
-          email: d.email,
-          cycle: {
-            planName: d.planName,
-            startDate: d.startDate,
-            endDate: d.endDate,
-            unitsTotal: d.unitsTotal,
-            amount: d.amount,
-          },
-        }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        upsertEntity(json.entity);
-        ok++;
+    submittingRef.current = true;
+    setIsSaving(true);
+    try {
+      let ok = 0;
+      for (const d of active) {
+        const res = await fetch("/api/entities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: d.name,
+            phone: d.phone,
+            email: d.email,
+            cycle: {
+              planName: d.planName,
+              startDate: d.startDate,
+              endDate: d.endDate,
+              unitsTotal: d.unitsTotal,
+              amount: d.amount,
+            },
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          upsertEntity(json.entity);
+          ok++;
+        }
       }
+      bumpDataVersion();
+      toast({ title: `Imported ${ok} ${business?.entityLabel.toLowerCase() ?? "entries"}s`, description: "Registration notifications sent." });
+      setPhotoDrafts([]);
+      setPhotoPreview(null);
+      setExcludedIdx(new Set());
+      close();
+    } finally {
+      submittingRef.current = false;
+      setIsSaving(false);
     }
-    bumpDataVersion();
-    toast({ title: `Imported ${ok} ${business?.entityLabel.toLowerCase() ?? "entries"}s`, description: "Registration notifications sent." });
-    setPhotoDrafts([]);
-    setPhotoPreview(null);
-    setExcludedIdx(new Set());
-    close();
   }
 
   async function saveDocDrafts() {
+    if (submittingRef.current) return; // Duplicate click guard
     const active = docDrafts.filter((_, i) => !docExcludedIdx.has(i));
     if (active.length === 0) {
       toast({ title: "No entries selected", variant: "destructive" });
       return;
     }
-    let ok = 0;
-    for (const d of active) {
-      const res = await fetch("/api/entities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: d.name,
-          phone: d.phone,
-          email: d.email,
-          cycle: {
-            planName: d.planName || "Standard Plan",
-            startDate: d.startDate || new Date().toISOString().slice(0, 10),
-            endDate: d.endDate,
-            unitsTotal: d.unitsTotal,
-            amount: d.amount,
-          },
-        }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        upsertEntity(json.entity);
-        ok++;
+    submittingRef.current = true;
+    setIsSaving(true);
+    try {
+      let ok = 0;
+      for (const d of active) {
+        const res = await fetch("/api/entities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: d.name,
+            phone: d.phone,
+            email: d.email,
+            cycle: {
+              planName: d.planName || "Standard Plan",
+              startDate: d.startDate || new Date().toISOString().slice(0, 10),
+              endDate: d.endDate,
+              unitsTotal: d.unitsTotal,
+              amount: d.amount,
+            },
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          upsertEntity(json.entity);
+          ok++;
+        }
       }
+      bumpDataVersion();
+      toast({ title: `Imported ${ok} records from ${docFileName || "file"}`, description: "Registration notifications sent." });
+      setDocDrafts([]);
+      setDocFileName(null);
+      setDocExcludedIdx(new Set());
+      close();
+    } finally {
+      submittingRef.current = false;
+      setIsSaving(false);
     }
-    bumpDataVersion();
-    toast({ title: `Imported ${ok} records from ${docFileName || "file"}`, description: "Registration notifications sent." });
-    setDocDrafts([]);
-    setDocFileName(null);
-    setDocExcludedIdx(new Set());
-    close();
   }
 
   function onOpenChange(o: boolean) {
@@ -424,15 +461,16 @@ export function AddEntityModal() {
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setVoiceDraft(null)}>
+                  <Button variant="outline" size="sm" onClick={() => setVoiceDraft(null)} disabled={isSaving}>
                     Discard
                   </Button>
                   <Button
                     size="sm"
                     className="bg-[var(--brand)] text-[var(--on-primary)] hover:bg-[var(--brand-deep)]"
                     onClick={saveVoiceDraft}
+                    disabled={isSaving}
                   >
-                    <Check className="h-4 w-4 mr-1" /> Confirm & Save
+                    {isSaving ? <span className="animate-pulse">Saving…</span> : <><Check className="h-4 w-4 mr-1" /> Confirm & Save</>}
                   </Button>
                 </div>
               </div>
@@ -528,16 +566,16 @@ export function AddEntityModal() {
 
             {photoDrafts.length > 0 && (
               <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => { setPhotoDrafts([]); setPhotoPreview(null); }}>
+                <Button variant="outline" size="sm" onClick={() => { setPhotoDrafts([]); setPhotoPreview(null); }} disabled={isSaving}>
                   Discard
                 </Button>
                 <Button
                   size="sm"
                   className="bg-[var(--brand)] text-[var(--on-primary)] hover:bg-[var(--brand-deep)]"
                   onClick={savePhotoDrafts}
+                  disabled={isSaving}
                 >
-                  <Check className="h-4 w-4 mr-1" />
-                  Import {photoDrafts.filter((_, i) => !excludedIdx.has(i)).length} entries
+                  {isSaving ? <span className="animate-pulse">Importing…</span> : <><Check className="h-4 w-4 mr-1" />Import {photoDrafts.filter((_, i) => !excludedIdx.has(i)).length} entries</>}
                 </Button>
               </div>
             )}
@@ -636,16 +674,16 @@ export function AddEntityModal() {
 
                 {docDrafts.length > 0 && (
                   <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="outline" size="sm" onClick={() => { setDocDrafts([]); setDocFileName(null); }}>
+                    <Button variant="outline" size="sm" onClick={() => { setDocDrafts([]); setDocFileName(null); }} disabled={isSaving}>
                       Discard
                     </Button>
                     <Button
                       size="sm"
                       className="bg-[var(--brand)] text-[var(--on-primary)] hover:bg-[var(--brand-deep)]"
                       onClick={saveDocDrafts}
+                      disabled={isSaving}
                     >
-                      <Check className="h-4 w-4 mr-1" />
-                      Import {docDrafts.filter((_, i) => !docExcludedIdx.has(i)).length} records
+                      {isSaving ? <span className="animate-pulse">Importing…</span> : <><Check className="h-4 w-4 mr-1" />Import {docDrafts.filter((_, i) => !docExcludedIdx.has(i)).length} records</>}
                     </Button>
                   </div>
                 )}
@@ -717,15 +755,16 @@ export function AddEntityModal() {
             )}
 
             <div className="flex justify-end gap-2 pt-3 border-t border-[var(--hairline)]">
-              <Button variant="outline" size="sm" onClick={close}>
+              <Button variant="outline" size="sm" onClick={close} disabled={isSaving}>
                 Cancel
               </Button>
               <Button
                 size="sm"
                 className="bg-[var(--brand)] text-[var(--on-primary)] hover:bg-[var(--brand-deep)] font-medium"
                 onClick={saveManual}
+                disabled={isSaving}
               >
-                Save {business?.entityLabel.toLowerCase()}
+                {isSaving ? <><span className="animate-pulse">Saving…</span></> : `Save ${business?.entityLabel.toLowerCase()}`}
               </Button>
             </div>
           </TabsContent>
