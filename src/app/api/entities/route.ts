@@ -214,33 +214,35 @@ export async function POST(req: NextRequest) {
       .replace(/{{start_date}}/g, cycle.startDate)
       .replace(/{{end_date}}/g, cycle.endDate ?? "");
 
-    const dispatch = await sendNotificationMessage({
-      toEmail: email,
-      toPhone: phone,
-      subject: `Welcome to ${business.name}`,
-      bodyText: msg,
-      businessName: business.name,
-    });
+    // Return the entity immediately — notification log is best-effort
+    // Wrap in try/catch so a PgBouncer prepared-statement error never blocks the save
+    try {
+      const dispatch = await sendNotificationMessage({
+        toEmail: email,
+        toPhone: phone,
+        subject: `Welcome to ${business.name}`,
+        bodyText: msg,
+        businessName: business.name,
+      });
 
-    await db.notificationLog.create({
-      data: {
-        entityId: created.id,
-        cycleId: created.cycles[0].id,
-        channel: dispatch.channel,
-        triggerType: "registration",
-        message: msg,
-        status: dispatch.status,
-      },
-    });
+      const dedupKey = `${created.id}:${created.cycles[0].id}:registration`;
+      await db.notificationLog.create({
+        data: {
+          entityId: created.id,
+          cycleId: created.cycles[0].id,
+          dedupKey,
+          channel: dispatch.channel,
+          triggerType: "registration",
+          message: msg,
+          status: dispatch.status,
+        },
+      });
+    } catch (notifErr: any) {
+      // Non-fatal: log warning but do not fail the save
+      console.warn("Registration notification skipped:", notifErr?.message);
+    }
 
-    const refreshed = await db.entity.findUnique({
-      where: { id: created.id },
-      include: {
-        cycles: { orderBy: { createdAt: "desc" } },
-        notifications: { orderBy: { sentAt: "desc" }, take: 50 },
-      },
-    });
-    return NextResponse.json({ entity: serializeEntity(refreshed!) });
+    return NextResponse.json({ entity: serializeEntity(created) });
   } catch (err: any) {
     console.error("POST /api/entities error:", err);
     return NextResponse.json({ error: err?.message ?? "Failed to create client entity" }, { status: 500 });
