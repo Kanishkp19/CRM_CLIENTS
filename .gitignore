@@ -56,3 +56,9 @@ next-env.d.ts
 # Temporary Scratch Files
 scratch/
 tmp/
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
